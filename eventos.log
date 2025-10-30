@@ -1,0 +1,17 @@
+[2025-10-30T15:04:33.990733+00:00] | [GERAL] | Processo Worker iniciado com sucesso.
+[2025-10-30T15:04:33.995067+00:00] | [GERAL] | ERRO CRÍTICO: Loop principal falhou: executar_passo_api_e_salvar() takes 0 positional arguments but 1 was given
+[2025-10-30T15:15:34.178516+00:00] | [GERAL] | ERRO CRÍTICO: Loop principal falhou: executar_passo_api_e_salvar() takes 0 positional arguments but 1 was given
+[2025-10-30T15:26:34.213417+00:00] | [GERAL] | ERRO CRÍTICO: Loop principal falhou: executar_passo_api_e_salvar() takes 0 positional arguments but 1 was given
+[2025-10-30T15:32:44.726592+00:00] | [INFO] | [GERAL] | Processo Worker iniciado com sucesso.
+[2025-10-30T15:32:44.739214+00:00] | [AVISO] | [Ponto-C-KM74] | AVISO API: API não retornou dados para o ponto.
+[2025-10-30T15:32:44.777567+00:00] | [MUDANCA] | [Ponto-A-KM67] | MUDANÇA DE BASE (1m): 0.0 -> 29.9
+[2025-10-30T15:32:44.778632+00:00] | [MUDANCA] | [Ponto-A-KM67] | MUDANÇA DE STATUS: INDEFINIDO -> ALERTA (Notificação NÃO enviada)
+[2025-10-30T15:32:44.779102+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE BASE (1m): 0.0 -> 30.1
+[2025-10-30T15:32:44.779684+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE STATUS: INDEFINIDO -> LIVRE (Notificação NÃO enviada)
+[2025-10-30T15:32:44.780184+00:00] | [MUDANCA] | [Ponto-C-KM74] | MUDANÇA DE STATUS: INDEFINIDO -> SEM DADOS (Notificação NÃO enviada)
+[2025-10-30T15:32:44.780494+00:00] | [MUDANCA] | [Ponto-D-KM81] | MUDANÇA DE BASE (1m): 0.0 -> 29.9
+[2025-10-30T15:32:44.780784+00:00] | [MUDANCA] | [Ponto-D-KM81] | MUDANÇA DE STATUS: INDEFINIDO -> ALERTA (Notificação NÃO enviada)
+[2025-10-30T16:07:36.743019+00:00] | [AVISO] | [Ponto-C-KM74] | AVISO API: API não retornou dados para o ponto.
+[2025-10-30T16:07:36.778091+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE BASE (1m): 30.1 -> 30.0
+[2025-10-30T16:07:36.778724+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE STATUS: LIVRE -> ALERTA (Notificação NÃO enviada)
+[2025-10-30T16:17:36.741233+00:00] | [AVISO] | [Ponto-C-KM74] | AVISO API: API não retornou dados para o ponto.

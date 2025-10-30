@@ -1,0 +1,54 @@
+/* assets/style.css */
+
+/* ... (Estilos gerais, cards, gauges, etc. mantidos) ... */
+body { font-family: 'Roboto', sans-serif; background-color: #f8f9fa; }
+h1, h2, h3, h4, h5, h6 { color: #343a40; margin-bottom: 0.5rem; }
+.map-summary-card { position: absolute; z-index: 1000; background-color: rgba(255, 255, 255, 0.9); border-radius: 0.5rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); width: 250px; padding: 0.5rem; max-height: calc(80vh - 4rem); overflow-y: auto; }
+.map-summary-left { top: 1rem; left: 1rem; }
+.map-summary-right { top: 1rem; right: 1rem; }
+.km-summary-block { border: 1px solid #dee2e6; border-radius: 0.3rem; padding: 0.5rem; margin-bottom: 0.75rem; background-color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.km-summary-block:last-child { margin-bottom: 0; }
+.gauge-vertical-container { position: relative; width: 60px; height: 100px; background-color: #e9ecef; border-radius: 0.25rem; overflow: hidden; margin: 0 auto; display: flex; align-items: flex-end; }
+.gauge-bar { width: 100%; transition: height 0.5s ease-out; }
+.gauge-label { position: absolute; width: 100%; top: 50%; left: 0; transform: translateY(-50%); text-align: center; font-weight: bold; color: #000; pointer-events: none; }
+
+/* Esta é a classe que força o texto do status a ficar preto e em negrito */
+.badge-black-text { color: #000 !important; font-weight: bold; }
+
+/* --- INÍCIO DA ALTERAÇÃO: Cor Amarela (Ouro) --- */
+.bg-warning {
+    background-color: #FFD700 !important; /* Amarelo Ouro */
+    color: #000 !important; /* Garante texto preto para contraste */
+}
+/* --- FIM DA ALTERAÇÃO --- */
+
+.bg-orange { background-color: #fd7e14 !important; }
+.badge-orange { color: #fff; background-color: #fd7e14 !important; }
+
+
+/* --- INÍCIO DA NOVA CORREÇÃO: Força texto preto nos cards --- */
+/* Garante que o Amarelo (Atenção) fique preto */
+.card.bg-warning,
+.card.bg-warning h5,
+.card.bg-warning p {
+    color: #000 !important;
+}
+
+/* Garante que o Laranja (Alerta) fique preto */
+.card.bg-orange,
+.card.bg-orange h5,
+.card.bg-orange p {
+    color: #000 !important;
+}
+
+/* Garante que o Vermelho (Paralisação) fique preto */
+.card.bg-danger,
+.card.bg-danger h5,
+.card.bg-danger p {
+    color: #000 !important;
+}
+/* --- FIM DA NOVA CORREÇÃO --- */
+
+
+/* (Estilos dos pinos removidos, conforme última reversão) */
+

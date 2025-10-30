@@ -1,0 +1,86 @@
+services:
+  # 1. O Dashboard (Web)
+  # Usa o seu Procfile original (gunicorn)
+  - type: web
+    name: app-geotecnia-web
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn index:server"
+    plan: starter # Plano Starter (aprox $7/mês)
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      # --- Chaves da API (coloque aqui no Render) ---
+      - key: ZENTRA_API_KEY
+        value: "" # Deixe em branco por enquanto
+      - key: ZENTRA_API_SECRET
+        value: "" # Deixe em branco por enquanto
+      # --- Chaves de Alerta (SMTP2GO e Comtele) ---
+      - key: SMTP2GO_API_KEY
+        value: "" # Insira sua chave real aqui
+      - key: SMTP2GO_SENDER_EMAIL
+        value: "" # Insira seu e-mail real aqui
+      - key: DESTINATARIOS_EMAIL
+        value: "" # Insira os e-mails reais aqui
+      - key: COMTELE_API_KEY
+        value: "" # Insira sua chave real aqui
+      - key: SMS_DESTINATARIOS
+        value: "" # Insira os números reais aqui
+      # --- Caminho do Disco ---
+      - key: DATA_DISK_PATH
+        value: /var/data
+
+  # 2. O Processo 24/7 (Worker)
+  - type: worker
+    name: app-geotecnia-worker
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python worker.py"
+    plan: starter # Plano Starter (aprox $7/mês)
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      # O worker também precisa de acesso às chaves
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: ZENTRA_API_KEY
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: ZENTRA_API_SECRET
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: SMTP2GO_API_KEY
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: SMTP2GO_SENDER_EMAIL
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: DESTINATARIOS_EMAIL
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: COMTELE_API_KEY
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: SMS_DESTINATARIOS
+      - fromService:
+          type: web
+          name: app-geotecnia-web
+          envVarKey: DATA_DISK_PATH
+    # Conecta o disco persistente a este worker
+    disks:
+      - name: geotecnia-data-disk
+        mountPath: /var/data
+
+  # 3. O Disco Persistente (Add-on)
+  # (Aprox $0.25/mês por 1GB)
+  - type: disk
+    name: geotecnia-data-disk
+    sizeGB: 1
+

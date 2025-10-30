@@ -1,0 +1,10 @@
+dash
+dash-bootstrap-components
+dash-leaflet
+plotly
+pandas
+numpy
+fpdf2
+gunicorn
+httpx
+requests
