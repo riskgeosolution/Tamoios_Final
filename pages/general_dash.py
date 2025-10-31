@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO)
+# pages/general_dash.py (FINAL CONSOLIDADO - CORRIGIDO NameError: df_umidade)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 
 # Importa o app central e helpers
 from app import app, TEMPLATE_GRAFICO_MODERNO
+# Importa constantes
 from config import PONTOS_DE_ANALISE, FREQUENCIA_API_SEGUNDOS
 import processamento
 
@@ -60,15 +61,26 @@ def update_general_dashboard(dados_json, selected_hours):
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
 
-        # --- CORREÇÃO DE TIPAGEM: Garante que colunas chave são do tipo correto ---
+        # --- TIPAGEM E CONVERSÃO DE FUSO HORÁRIO (ROBUSTO) ---
         df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp'])
+
+        # 1. Trata fuso horário
+        if df_completo['timestamp'].dt.tz is None:
+            df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
+        else:
+            df_completo['timestamp'] = df_completo['timestamp'].dt.tz_convert('UTC')
+
+        # 2. Converte para o fuso horário local do Brasil para VISUALIZAÇÃO
+        df_completo['timestamp_local'] = df_completo['timestamp'].dt.tz_convert('America/Sao_Paulo')
+
         df_completo['chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
         df_completo['umidade_1m_perc'] = pd.to_numeric(df_completo['umidade_1m_perc'], errors='coerce')
         df_completo['umidade_2m_perc'] = pd.to_numeric(df_completo['umidade_2m_perc'], errors='coerce')
         df_completo['umidade_3m_perc'] = pd.to_numeric(df_completo['umidade_3m_perc'], errors='coerce')
-        # --- FIM DA CORREÇÃO DE TIPAGEM ---
+        # --- FIM DA CONVERSÃO DE FUSO HORÁRIO ---
 
     except Exception as e:
+        # Retorna o erro original, mas melhor formatado
         return dbc.Alert(f"Erro ao ler dados: {e}", color="danger")
 
     layout_geral = []
@@ -76,22 +88,39 @@ def update_general_dashboard(dados_json, selected_hours):
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: continue
 
-        # Lógica de cálculo de pontos (baseada no selected_hours)
+        # Lógica de cálculo de pontos
         PONTOS_POR_HORA = int(60 / (FREQUENCIA_API_SEGUNDOS / 60))
         n_pontos_desejados = selected_hours * PONTOS_POR_HORA
         n_pontos_plot = min(n_pontos_desejados, len(df_ponto))
         df_ponto_plot = df_ponto.tail(n_pontos_plot)
+
+        # Acumulado (chama processamento.py, que retorna apenas 'timestamp' e 'chuva_mm')
         df_chuva_72h_completo = processamento.calcular_acumulado_72h(df_ponto)
         df_chuva_72h_plot = df_chuva_72h_completo.tail(n_pontos_plot)
         n_horas_titulo = selected_hours
 
+        # --- CORREÇÃO: ADICIONAR TIMESTAMP LOCAL AO DF DE ACUMULADO ---
+        if 'timestamp' in df_chuva_72h_plot.columns:
+            if df_chuva_72h_plot['timestamp'].dt.tz is None:
+                df_chuva_72h_plot['timestamp'] = df_chuva_72h_plot['timestamp'].dt.tz_localize('UTC')
+
+            df_chuva_72h_plot['timestamp_local'] = df_chuva_72h_plot['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        else:
+            df_chuva_72h_plot['timestamp_local'] = df_chuva_72h_plot['timestamp']
+        # --- FIM DA CORREÇÃO ---
+
         # Gráfico de Chuva
         fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_chuva.add_trace(go.Bar(x=df_ponto_plot['timestamp'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária',
-                                   marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+
+        # --- USANDO TIMESTAMP LOCAL PARA O EIXO X ---
         fig_chuva.add_trace(
-            go.Scatter(x=df_chuva_72h_plot['timestamp'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
+            go.Bar(x=df_ponto_plot['timestamp_local'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária',
+                   marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+        fig_chuva.add_trace(
+            go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
                        mode='lines', line=dict(color='#007BFF', width=2.5)), secondary_y=True)
+        # --- FIM DO USO ---
+
         fig_chuva.update_layout(title_text=f"Pluviometria - {config['nome']} ({n_horas_titulo}h)",
                                 template=TEMPLATE_GRAFICO_MODERNO,
                                 margin=dict(l=40, r=20, t=50, b=40),
@@ -99,11 +128,18 @@ def update_general_dashboard(dados_json, selected_hours):
                                 yaxis_title="Pluv. Horária (mm)",
                                 yaxis2_title="Acumulada (mm)",
                                 hovermode="x unified", bargap=0.1)
+
+        # --- CORREÇÃO CRÍTICA: FORÇAR TICKS DE 15 MINUTOS NO EIXO X ---
+        fig_chuva.update_xaxes(
+            dtick=15 * 60 * 1000,  # 15 minutos em milissegundos
+            tickformat="%H:%M"  # Formato de hora:minuto
+        )
+
         fig_chuva.update_yaxes(title_text="Pluv. Horária (mm)", secondary_y=False);
         fig_chuva.update_yaxes(title_text="Acumulada (mm)", secondary_y=True)
 
-        # Gráfico de Umidade
-        df_umidade = df_ponto_plot.melt(id_vars=['timestamp'],
+        # --- REINSERÇÃO: GRÁFICO DE UMIDADE ---
+        df_umidade = df_ponto_plot.melt(id_vars=['timestamp_local'],
                                         value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                         var_name='Sensor', value_name='Umidade Solo (%)')
 
@@ -113,9 +149,10 @@ def update_general_dashboard(dados_json, selected_hours):
             'umidade_3m_perc': '3m'
         })
 
-        fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade Solo (%)', color='Sensor',
+        fig_umidade = px.line(df_umidade, x='timestamp_local', y='Umidade Solo (%)', color='Sensor',
                               title=f"Umidade Solo - {config['nome']} ({n_horas_titulo}h)",
                               color_discrete_map=CORES_UMIDADE)
+        # --- FIM DA REINSERÇÃO ---
 
         fig_umidade.update_traces(line=dict(width=3))
         fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),

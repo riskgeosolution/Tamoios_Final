@@ -40,3 +40,93 @@
 2025-10-31T00:37:20.857208+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
 2025-10-31T00:37:20.857721+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
 2025-10-31T00:37:20.858197+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.
+2025-10-31T00:52:58.878509+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:52:58.882423+00:00 | GERAL | ERRO CRÍTICO (loop principal): name 'historico_df' is not defined
+2025-10-31T00:53:38.428745+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:53:39.050307+00:00 | Ponto-A-KM67 | AVISO API: Credenciais para Ponto-A-KM67 não preenchidas. Usando Placeholder.
+2025-10-31T00:53:39.050707+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
+2025-10-31T00:53:39.050937+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
+2025-10-31T00:53:39.051149+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.
+2025-10-31T00:53:39.062915+00:00 | GERAL | ERRO CRÍTICO (loop principal): name 'pd' is not defined
+2025-10-31T00:54:24.790995+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:54:25.601593+00:00 | Ponto-A-KM67 | AVISO API: Credenciais para Ponto-A-KM67 não preenchidas. Usando Placeholder.
+2025-10-31T00:54:25.602323+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
+2025-10-31T00:54:25.602821+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
+2025-10-31T00:54:25.603292+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.
+2025-10-31T01:14:03.888262+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:14:03.995904+00:00 | DB_READ | ERRO ao ler histórico: (sqlite3.OperationalError) no such table: dados_monitoramento
+[SQL: 
+    SELECT * FROM dados_monitoramento 
+    WHERE timestamp >= '2025-10-28T00:14:03.989478Z'
+    ORDER BY timestamp ASC;
+    ]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-10-31T01:14:06.190110+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:06.190942+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:06.191486+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:06.192131+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:53.166881+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:14:54.677157+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:54.677686+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:54.677912+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:54.678125+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:14:54.701987+00:00 | GERAL | ERRO CRÍTICO (loop principal): name 'verificar_alertas' is not defined
+2025-10-31T01:15:32.233038+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:15:34.273454+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:15:34.274217+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:15:34.274779+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:15:34.275259+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:25:26.039965+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:25:27.664948+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:25:27.665484+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:25:27.665737+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:25:27.665977+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:27:28.757612+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:27:30.333701+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:27:30.334311+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:27:30.334569+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:27:30.334778+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:42:30.579232+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:42:30.579703+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:42:30.580067+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:42:30.580328+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:44:50.240685+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T01:44:51.898885+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:44:51.899288+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:44:51.899493+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:44:51.899686+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:59:52.070843+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:59:52.071265+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:59:52.071564+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T01:59:52.071814+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:14:51.994081+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:14:51.994920+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:14:51.995215+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:14:51.995457+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:29:52.709591+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:29:52.710348+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:29:52.710913+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:29:52.711435+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:44:52.100017+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:44:52.100749+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:44:52.101072+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:44:52.101270+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados.
+2025-10-31T02:53:50.924637+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T02:53:52.644570+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T02:53:52.645166+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T02:53:52.645461+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T02:53:52.645704+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T03:08:52.782739+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:08:52.783475+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:08:52.783770+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:08:52.784024+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T03:16:31.996940+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T03:16:34.311171+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:16:34.312077+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:16:34.312730+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:16:34.313245+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T03:20:34.362797+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T03:20:35.977339+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:20:35.977848+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:20:35.978074+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T03:20:35.978287+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido

@@ -1,5 +1,11 @@
+# config.py (CORRIGIDO: Conexão DB e Mapeamento Multi-API)
+
 import os
 import datetime
+from dotenv import load_dotenv
+
+# Carrega as variáveis do .env file
+load_dotenv()
 
 # --- Configurações da API Real (WeatherLink) ---
 
@@ -12,29 +18,35 @@ MAPEAMENTO_API_IDS = {
 }
 
 # --- CONFIGURAÇÃO MULTI-ESTAÇÃO ---
+# Credenciais lidas do ambiente (Render ou .env local)
 WEATHERLINK_CONFIG = {
     "Ponto-A-KM67": {
         "STATION_ID": 179221, # KM67
-        "API_KEY": os.environ.get('WL_API_KEY_KM67', "SUA_CHAVE_API_KM67"),
-        "API_SECRET": os.environ.get('WL_API_SECRET_KM67', "SEU_SEGREDO_API_KM67")
+        "API_KEY": os.getenv('WL_API_KEY_KM67', "SUA_CHAVE_API_KM67"),
+        "API_SECRET": os.getenv('WL_API_SECRET_KM67', "SEU_SEGREDO_API_KM67")
     },
     "Ponto-B-KM72": {
         "STATION_ID": 197768, # KM72
-        "API_KEY": os.environ.get('WL_API_KEY_KM72', "SUA_CHAVE_API_KM72"),
-        "API_SECRET": os.environ.get('WL_API_SECRET_KM72', "SEU_SEGREDO_API_KM72")
+        "API_KEY": os.getenv('WL_API_KEY_KM72', "SUA_CHAVE_API_KM72"),
+        "API_SECRET": os.getenv('WL_API_SECRET_KM72', "SEU_SEGREDO_API_KM72")
     },
     "Ponto-C-KM74": {
         "STATION_ID": 197774, # KM74
-        "API_KEY": os.environ.get('WL_API_KEY_KM74', "SUA_CHAVE_API_KM74"),
-        "API_SECRET": os.environ.get('WL_API_SECRET_KM74', "SEU_SEGREDO_API_KM74")
+        "API_KEY": os.getenv('WL_API_KEY_KM74', "SUA_CHAVE_API_KM74"),
+        "API_SECRET": os.getenv('WL_API_SECRET_KM74', "SEU_SEGREDO_API_KM74")
     },
     "Ponto-D-KM81": {
         "STATION_ID": 197778, # KM81
-        "API_KEY": os.environ.get('WL_API_KEY_KM81', "SUA_CHAVE_API_KM81"),
-        "API_SECRET": os.environ.get('WL_API_SECRET_KM81', "SEU_SEGREDO_API_KM81")
+        "API_KEY": os.getenv('WL_API_KEY_KM81', "SUA_CHAVE_API_KM81"),
+        "API_SECRET": os.getenv('WL_API_SECRET_KM81', "SEU_SEGREDO_API_KM81")
     }
 }
 # --- FIM DA CONFIGURAÇÃO MULTI-ESTAÇÃO ---
+
+# --- CONFIGURAÇÕES DO BANCO DE DADOS ---
+# Usa DATABASE_URL do ambiente (Render/Postgres) ou SQLite local para desenvolvimento.
+DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
+# --- FIM DA CONFIGURAÇÃO DB ---
 
 
 # --- Configurações do Worker ---
@@ -43,6 +55,7 @@ MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS # Manter 72h de
 
 
 # --- Configurações dos Pontos de Análise ---
+# CONSTANTES_PADRAO PRECISA SER DEFINIDA AQUI NO TOPO!
 CONSTANTES_PADRAO = {
     "UMIDADE_BASE_1M": 30.0, "UMIDADE_BASE_2M": 36.0, "UMIDADE_BASE_3M": 39.0,
     "UMIDADE_SATURACAO_1M": 47.0,
