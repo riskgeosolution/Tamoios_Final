@@ -1,3 +1,5 @@
+# pages/specific_dash.py (CORRIGIDO: IndentationError)
+
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -12,19 +14,17 @@ import json  # Importa JSON
 
 # Importa o app central e helpers
 from app import app, TEMPLATE_GRAFICO_MODERNO
-# --- Importações Corrigidas ---
 from config import (
-    PONTOS_DE_ANALISE, CONSTANTES_PADRAO, FREQUENCIA_API,
+    PONTOS_DE_ANALISE, CONSTANTES_PADRAO, FREQUENCIA_API_SEGUNDOS,
     RISCO_MAP, STATUS_MAP_HIERARQUICO
 )
-# --- Fim da Correção ---
 import processamento
 import gerador_pdf
 
-# --- Mapas de Cores (Mantidos, pois são específicos desta página) ---
+# --- Mapas de Cores ---
 CORES_ALERTAS_CSS = {
     "verde": "green",
-    "amarelo": "#FFD700",  # Amarelo Ouro
+    "amarelo": "#FFD700",
     "laranja": "#fd7e14",
     "vermelho": "#dc3545",
     "cinza": "grey"
@@ -34,12 +34,6 @@ CORES_UMIDADE = {
     '2m': CORES_ALERTAS_CSS["amarelo"],
     '3m': CORES_ALERTAS_CSS["vermelho"]
 }
-
-
-# --- Constantes de Risco (REMOVIDAS) ---
-# (Agora são importadas do config.py)
-# RISCO = {"LIVRE": 0, ...}
-# mapa_status_cor_geral = { ... }
 
 
 # --- Layout da Página Específica ---
@@ -130,9 +124,12 @@ def get_layout():
                 ]),
                 dbc.Button("Fechar", id='btn-fechar-logs', color="secondary")
             ]),
-        ], id='modal-logs', is_open=False, size="lg"),  # Modal grande
+        ], id='modal-logs', is_open=False, size="lg"),
 
-    ], fluid=True)
+    ], fluid=True)  # <--- O return dbc.Container(...) é o bloco que engloba tudo
+
+
+# O restante do código (callbacks) não precisa de recuo, pois está no nível raiz do arquivo.
 
 
 # --- Callbacks da Página Específica ---
@@ -140,7 +137,7 @@ def get_layout():
 # Callback para definir o TÍTULO (Estação KM)
 @app.callback(
     Output('specific-dash-title', 'children'),
-    Input('url', 'pathname')
+    Input('url-raiz', 'pathname')  # Corrigido para url-raiz
 )
 def update_specific_title(pathname):
     if not pathname.startswith('/ponto/'):
@@ -164,9 +161,9 @@ def update_specific_title(pathname):
         Output('store-id-ponto-ativo', 'data')
     ],
     [
-        Input('url', 'pathname'),
+        Input('url-raiz', 'pathname'),  # Corrigido para url-raiz
         Input('store-dados-sessao', 'data'),
-        Input('store-ultimo-status', 'data'),  # Adiciona o status
+        Input('store-ultimo-status', 'data'),
         Input('graph-time-selector', 'value')
     ]
 )
@@ -186,24 +183,30 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     base_1m = constantes_ponto.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
     base_2m = constantes_ponto.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
     base_3m = constantes_ponto.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
-    saturacao_1m = constantes_ponto.get('UMIDADE_SATURACAO_1M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_1M', 45.0))
-    saturacao_2m = constantes_ponto.get('UMIDADE_SATURACAO_2M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_2M', 45.0))
-    saturacao_3m = constantes_ponto.get('UMIDADE_SATURACAO_3M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_3M', 45.0))
 
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
-        status_atual_dict = json.loads(status_json)
+
+        # status_json JÁ É UM DICIONÁRIO
+        status_atual_dict = status_json
+
     except Exception as e:
         print(f"Erro ao ler JSON (specific_dash): {e}")
         return "Erro ao carregar dados.", "", id_ponto
 
-    df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
+    df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
 
     if df_ponto.empty:
         return dbc.Alert("Sem dados históricos para este ponto.", color="warning", className="m-3"), "", id_ponto
 
-    # Garante que o timestamp seja datetime (necessário após ler do JSON)
+    # --- CORREÇÃO DE TIPAGEM: Garante que colunas chave são do tipo correto ---
     df_ponto['timestamp'] = pd.to_datetime(df_ponto['timestamp'])
+    df_ponto['chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
+    df_ponto['precipitacao_acumulada_mm'] = pd.to_numeric(df_ponto['precipitacao_acumulada_mm'], errors='coerce')
+    df_ponto['umidade_1m_perc'] = pd.to_numeric(df_ponto['umidade_1m_perc'], errors='coerce')
+    df_ponto['umidade_2m_perc'] = pd.to_numeric(df_ponto['umidade_2m_perc'], errors='coerce')
+    df_ponto['umidade_3m_perc'] = pd.to_numeric(df_ponto['umidade_3m_perc'], errors='coerce')
+    # --- FIM DA CORREÇÃO DE TIPAGEM ---
 
     # Pega o status geral (calculado pelo worker)
     status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
@@ -244,11 +247,11 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     # Cores Individuais para Card de Umidade (baseado no delta)
     from config import DELTA_TRIGGER_UMIDADE
     css_color_s1 = CORES_ALERTAS_CSS["amarelo"] if (umidade_1m_atual - base_1m) >= DELTA_TRIGGER_UMIDADE else \
-    CORES_ALERTAS_CSS["verde"]
+        CORES_ALERTAS_CSS["verde"]
     css_color_s2 = CORES_ALERTAS_CSS["laranja"] if (umidade_2m_atual - base_2m) >= DELTA_TRIGGER_UMIDADE else \
-    CORES_ALERTAS_CSS["verde"]
+        CORES_ALERTAS_CSS["verde"]
     css_color_s3 = CORES_ALERTAS_CSS["vermelho"] if (umidade_3m_atual - base_3m) >= DELTA_TRIGGER_UMIDADE else \
-    CORES_ALERTAS_CSS["verde"]
+        CORES_ALERTAS_CSS["verde"]
 
     # Layout dos Cards
     layout_cards = [
@@ -301,7 +304,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp'] >= limite_tempo_grafico]
 
     if df_ponto_plot.empty:
-        df_ponto_plot = df_ponto.tail(1)  # Pega o último se o filtro esvaziar
+        df_ponto_plot = df_ponto.tail(1)
 
     # Recalcula o acumulado de 72h (rolling) para o gráfico
     df_chuva_72h_plot = processamento.calcular_acumulado_72h(df_ponto_plot)
@@ -350,6 +353,8 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     return layout_cards, layout_graficos, id_ponto
 
 
+# ... (o restante dos callbacks de PDF e Logs estão abaixo e continuam a partir do mesmo nível de indentação) ...
+
 # Callback 2: Gerar o PDF (Dados)
 @app.callback(
     [Output('download-pdf-especifico', 'data'),
@@ -382,16 +387,15 @@ def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_pon
     df_completo = pd.read_json(StringIO(dados_json), orient='split')
     if df_completo.empty:
         print("Sem dados período PDF (df_completo vazio).")
-        return dash.no_update, True  # Mostra o alerta de erro
+        return dash.no_update, True
 
     df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
 
-    # --- Correção Definitiva do TypeError de Fuso Horário ---
-    # 1. Converte o timestamp do DF (que veio do JSON) para UTC
+    # --- Correção Definitiva do TypeError de Fuso Horário e Tipagem ---
     df_ponto['timestamp'] = pd.to_datetime(df_ponto['timestamp']).dt.tz_localize('UTC')
+    df_ponto['chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')  # Garantir tipagem
 
     try:
-        # 2. Converte as datas do calendário para UTC
         start_date_dt = pd.to_datetime(start_date_str).tz_localize('UTC')
         end_date_dt = (pd.to_datetime(end_date_str) + pd.Timedelta(days=1)).tz_localize('UTC')
     except Exception as e:
@@ -403,7 +407,7 @@ def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_pon
 
     if df_periodo.empty:
         print("Sem dados período PDF (filtro resultou em vazio).")
-        return dash.no_update, True  # Mostra o alerta de erro
+        return dash.no_update, True
 
     df_chuva_72h_pdf = processamento.calcular_acumulado_72h(df_periodo)
 
@@ -535,7 +539,9 @@ def carregar_logs_no_modal(is_open, id_ponto, logs_json):
         return "Nenhum evento registrado para este ponto."
 
     try:
-        logs_list = json.loads(logs_json)
+        # logs_json JÁ É UMA LISTA GRAÇAS AO DCC.STORE
+        logs_list = logs_json
+
         if not logs_list:
             return "Nenhum evento registrado."
 
@@ -590,15 +596,17 @@ def gerar_download_pdf_logs(n_clicks, id_ponto, logs_json):
         return dash.no_update
 
     try:
-        logs_list = json.loads(logs_json)
+        # logs_json JÁ É UMA LISTA GRAÇAS AO DCC.STORE
+        logs_list = logs_json
+
         if not logs_list:
-            return dash.no_update  # Não gera PDF vazio
+            return dash.no_update
 
         # Filtra logs (mesma lógica do modal)
         logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
 
         if not logs_filtrados:
-            return dash.no_update  # Não gera PDF vazio
+            return dash.no_update
 
         # Gera o PDF em memória
         pdf_bytes = gerador_pdf.criar_relatorio_logs_em_memoria(id_ponto, logs_filtrados)
@@ -610,4 +618,3 @@ def gerar_download_pdf_logs(n_clicks, id_ponto, logs_json):
     except Exception as e:
         print(f"Erro ao gerar PDF de logs: {e}")
         return dash.no_update
-

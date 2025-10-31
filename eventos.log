@@ -15,3 +15,28 @@
 [2025-10-30T16:07:36.778091+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE BASE (1m): 30.1 -> 30.0
 [2025-10-30T16:07:36.778724+00:00] | [MUDANCA] | [Ponto-B-KM72] | MUDANÇA DE STATUS: LIVRE -> ALERTA (Notificação NÃO enviada)
 [2025-10-30T16:17:36.741233+00:00] | [AVISO] | [Ponto-C-KM74] | AVISO API: API não retornou dados para o ponto.
+2025-10-30T23:44:20.370623+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-30T23:44:20.375733+00:00 | Ponto-C-KM74 | AVISO API: API não retornou dados para o ponto.
+2025-10-30T23:44:20.408751+00:00 | Ponto-B-KM72 | MUDANÇA DE STATUS: ALERTA -> LIVRE (Notificação NÃO enviada)
+2025-10-30T23:44:20.409210+00:00 | Ponto-B-KM72 | MUDANÇA DE BASE (1m): 0 -> 30.0
+2025-10-30T23:46:56.735743+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-30T23:46:56.744130+00:00 | Ponto-C-KM74 | AVISO API: API não retornou dados para o ponto.
+2025-10-31T00:01:56.799574+00:00 | Ponto-C-KM74 | AVISO API: API não retornou dados para o ponto.
+2025-10-31T00:16:56.756841+00:00 | Ponto-C-KM74 | AVISO API: API não retornou dados para o ponto.
+2025-10-31T00:31:56.769556+00:00 | Ponto-C-KM74 | AVISO API: API não retornou dados para o ponto.
+2025-10-31T00:34:13.057284+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:34:13.063719+00:00 | Ponto-A-KM67 | AVISO API: Credenciais para Ponto-A-KM67 não preenchidas. Usando Placeholder.
+2025-10-31T00:34:13.063983+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
+2025-10-31T00:34:13.064204+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
+2025-10-31T00:34:13.064416+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.
+2025-10-31T00:34:13.070952+00:00 | Ponto-C-KM74 | MUDANÇA DE STATUS: SEM DADOS -> LIVRE (Notificação NÃO enviada)
+2025-10-31T00:36:36.754624+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:36:36.760974+00:00 | Ponto-A-KM67 | AVISO API: Credenciais para Ponto-A-KM67 não preenchidas. Usando Placeholder.
+2025-10-31T00:36:36.761283+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
+2025-10-31T00:36:36.761511+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
+2025-10-31T00:36:36.761916+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.
+2025-10-31T00:37:20.840777+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T00:37:20.856564+00:00 | Ponto-A-KM67 | AVISO API: Credenciais para Ponto-A-KM67 não preenchidas. Usando Placeholder.
+2025-10-31T00:37:20.857208+00:00 | Ponto-B-KM72 | AVISO API: Credenciais para Ponto-B-KM72 não preenchidas. Usando Placeholder.
+2025-10-31T00:37:20.857721+00:00 | Ponto-C-KM74 | AVISO API: Credenciais para Ponto-C-KM74 não preenchidas. Usando Placeholder.
+2025-10-31T00:37:20.858197+00:00 | Ponto-D-KM81 | AVISO API: Credenciais para Ponto-D-KM81 não preenchidas. Usando Placeholder.

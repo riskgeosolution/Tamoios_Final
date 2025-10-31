@@ -1,3 +1,5 @@
+# pages/map_view.py (FINAL CONSOLIDADO - COM INDENTAÇÃO CORRETA)
+
 import dash
 from dash import html, dcc, callback, Input, Output
 import dash_bootstrap_components as dbc
@@ -8,7 +10,7 @@ import traceback
 import numpy as np
 import json
 
-# Importa o app central e helpers
+# IMPORTAÇÃO CRÍTICA: Deve vir logo após as bibliotecas Dash/Python para definir o @app.callback
 from app import app
 # Importa constantes do config.py
 from config import PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO, CHUVA_LIMITE_VERDE, \
@@ -19,7 +21,7 @@ import data_source  # Importa data_source para as colunas
 
 
 # --- Layout da Página do Mapa (Mantido) ---
-def get_layout():
+def get_layout():  # <--- DEVE ESTAR NA COLUNA 1
     """ Retorna o layout da página do mapa. """
     print("Executando map_view.get_layout() (Dois Cards Superiores)")
     try:
@@ -53,7 +55,6 @@ def get_layout():
 
 
 # --- Callback 1: Atualiza os Pinos no mapa ---
-# (CORRIGIDO para desenhar TODOS os pinos, mesmo "SEM DADOS")
 @app.callback(
     Output('map-pins-layer', 'children'),
     Input('store-dados-sessao', 'data')  # Apenas dados
@@ -63,44 +64,56 @@ def update_map_pins(dados_json):
         return []
 
     try:
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
+        # Tenta ler o JSON para DataFrame E FAZ CÓPIA IMEDIATAMENTE
+        df_completo = pd.read_json(StringIO(dados_json), orient='split').copy()
 
-        # --- INÍCIO DA CORREÇÃO (Bug do Pino Sumido) ---
-        # Verifica se o DF está vazio ou malformado
         if 'timestamp' not in df_completo.columns or df_completo.empty:
-            print("[map_view] update_map_pins: Histórico vazio ou malformado, sem pinos.")
-            df_ultimo = pd.DataFrame(columns=df_completo.columns)  # Cria DF vazio com colunas
-        else:
-            # Pega o timestamp mais recente
-            ultimo_timestamp = df_completo['timestamp'].max()
-            if pd.isna(ultimo_timestamp):
-                print("[map_view] update_map_pins: Timestamp máximo é NaT, sem pinos.")
-                df_ultimo = pd.DataFrame(columns=df_completo.columns)  # Cria DF vazio com colunas
-            else:
-                # Filtra o DF para conter APENAS os dados do último timestamp
-                df_ultimo = df_completo[df_completo['timestamp'] == ultimo_timestamp]
-        # --- FIM DA CORREÇÃO ---
+            print("[map_view] update_map_pins: Histórico vazio ou malformado.")
+            return []
+
+        # 1. Converte para datetime e trata erros (coerção para NaT)
+        df_completo.loc[:, 'timestamp'] = pd.to_datetime(df_completo['timestamp'], errors='coerce')
+
+        # 2. Remove NaT (Not a Time)
+        df_validos = df_completo.dropna(subset=['timestamp']).copy()
+
+        if df_validos.empty:
+            print("[map_view] update_map_pins: Sem timestamps válidos para plotar.")
+            return []
+
+        # --- LÓGICA DE FILTRO ROBUSTO POR nlargest ---
+        # Pega a lista de linhas que contêm o timestamp mais recente.
+        df_ultimo = df_validos.nlargest(len(PONTOS_DE_ANALISE), 'timestamp')
+
+        # Garante que só há 1 timestamp na seleção (o mais recente)
+        ultimo_timestamp = df_ultimo['timestamp'].max()
+        df_ultimo = df_ultimo[df_ultimo['timestamp'] == ultimo_timestamp]
+
+        if df_ultimo.empty:
+            print("[map_view] update_map_pins: Filtro nlargest falhou, mas deveria ter dados.")
+            return []
+        # --- FIM DA LÓGICA DE FILTRO ROBUSTO ---
 
     except Exception as e:
-        print(f"ERRO em update_map_pins ao processar dados: {e}")
+        print(f"ERRO CRÍTICO em update_map_pins ao processar dados: {e}")
+        traceback.print_exc()
         return []
 
     pinos_do_mapa = []
 
-    # Itera sobre os PONTOS DE ANALISE (do config.py) e não sobre o DF
+    # Itera sobre os PONTOS DE ANALISE (do config.py)
     for id_ponto, config in PONTOS_DE_ANALISE.items():
 
         # Pega os dados deste ponto no último timestamp
         dados_ponto = df_ultimo[df_ultimo['id_ponto'] == id_ponto]
 
-        # Se não houver dados no último timestamp (o que acontece com "SEM DADOS")
-        # nós ainda desenhamos o pino, mas com chuva 0.0
+        chuva_72h_pino = 0.0
+
         if dados_ponto.empty:
-            # print(f"[map_view] update_map_pins: Sem dados no último timestamp para {id_ponto}. Desenhando pino com 0mm.")
             chuva_72h_pino = 0.0
         else:
             try:
-                # Se houver dados, pega a chuva acumulada
+                # O .get lida melhor com valores pd.NA
                 chuva_72h_pino = dados_ponto.iloc[0].get('precipitacao_acumulada_mm', 0.0)
                 if pd.isna(chuva_72h_pino):
                     chuva_72h_pino = 0.0
@@ -108,20 +121,21 @@ def update_map_pins(dados_json):
                 print(f"Erro ao ler dados do pino {id_ponto}: {e}")
                 chuva_72h_pino = 0.0
 
-        # Cria o pino (agora sempre cria, mesmo com 0.0mm)
+        # Cria o pino
         pino = dl.Marker(
             position=config['lat_lon'],
             children=[
                 dl.Tooltip(config['nome']),
                 dl.Popup([
                     html.H5(config['nome']),
-                    # Mostra o acumulado de 72h (que será 0.0 para "SEM DADOS")
                     html.P(f"Chuva (72h): {chuva_72h_pino:.1f} mm"),
                     dbc.Button("Ver Dashboard", href=f"/ponto/{id_ponto}", size="sm", color="primary")
                 ])
             ]
         )
         pinos_do_mapa.append(pino)
+
+    print(f"[map_view] update_map_pins: Gerados {len(pinos_do_mapa)} pinos.")
 
     return pinos_do_mapa
 
@@ -140,29 +154,34 @@ def get_color_class_chuva(value):
         return "bg-danger"
 
 
-# --- Função create_km_block (CORRIGIDA para ler o status do dcc.Store) ---
+# --- Função create_km_block ---
 def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     """
     Cria o bloco de resumo do KM para os cards laterais.
-    Recebe o status_ponto_txt (LIVRE, ALERTA, etc.) diretamente.
     """
 
     ultima_chuva_72h = 0.0
 
+    # --- INICIALIZAÇÃO PARA GARANTIR O ESCOPO ---
+    status_chuva_txt = "SEM DADOS"
+    status_chuva_col = "secondary"
+    cor_chuva_class = "bg-secondary"
+    status_umid_txt = "SEM DADOS"
+    status_umid_col = "secondary"
+    cor_umidade_class = "bg-secondary"
+    risco_umidade = -1
+    # --- FIM DA INICIALIZAÇÃO ---
+
     # --- Status da Chuva (baseado no status geral) ---
-    # (Isso garante que o card "Chuva" e "Status Geral" mostrem o mesmo)
     status_chuva_txt = status_ponto_txt
 
     # Mapeia o texto do status para a cor do Bootstrap
-    # (Usa os mapas importados do config.py)
     _, status_chuva_col, cor_chuva_class = STATUS_MAP_HIERARQUICO.get(
         RISCO_MAP.get(status_chuva_txt, -1),
         STATUS_MAP_HIERARQUICO[-1]  # Default é "SEM DADOS"
     )
 
-    # --- Status da Umidade (Placeholder) ---
-    # (Na arquitetura atual, os cards do mapa mostram apenas o Status Geral,
-    # que é baseado principalmente na CHUVA vinda da API)
+    # --- Status da Umidade (Reflete o Status Geral) ---
     status_umid_txt = status_ponto_txt
     status_umid_col = status_chuva_col
     cor_umidade_class = cor_chuva_class
@@ -170,8 +189,18 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
 
     try:
         if not df_ponto.empty:
+
+            # Tipagem já está garantida no callback, mas reforçamos a checagem
+            if 'timestamp' in df_ponto.columns:
+                df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'], errors='coerce')
+                df_ponto = df_ponto.dropna(subset=['timestamp']).copy()
+
+            if 'chuva_mm' in df_ponto.columns:
+                df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
+
             # Pega o último dado de chuva acumulada (apenas para o NÚMERO no gauge)
             df_chuva_72h = processamento.calcular_acumulado_72h(df_ponto)
+
             if not df_chuva_72h.empty:
                 chuva_val = df_chuva_72h.iloc[-1]['chuva_mm']
                 if not pd.isna(chuva_val):
@@ -179,6 +208,7 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
 
     except Exception as e:
         print(f"ERRO GERAL em create_km_block para {id_ponto}: {e}")
+        traceback.print_exc()
         ultima_chuva_72h = 0.0
         status_chuva_txt = "ERRO";
         status_chuva_col = "danger";
@@ -189,10 +219,9 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     chuva_max_visual = 90.0
     chuva_percent = max(0, min(100, (ultima_chuva_72h / chuva_max_visual) * 100))
     if status_chuva_txt == "SEM DADOS":
-        chuva_percent = 0  # Gauge de "SEM DADOS" fica cinza e vazio
+        chuva_percent = 0
 
-    # --- Lógica do Gauge de Umidade (Visual) ---
-    # (O gauge de umidade agora reflete o Status Geral)
+    # --- Lógica do Gauge de Status Geral (Visual) ---
     umidade_percent_realista = 0
     if risco_umidade == 0:
         umidade_percent_realista = 25
@@ -203,7 +232,7 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     elif risco_umidade == 3:
         umidade_percent_realista = 100
     if status_umid_txt == "SEM DADOS":
-        umidade_percent_realista = 0  # Gauge de "SEM DADOS" fica cinza e vazio
+        umidade_percent_realista = 0
 
     # --- Montagem dos Gauges ---
     chuva_gauge = html.Div(
@@ -221,7 +250,6 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     )
     chuva_badge = dbc.Badge(status_chuva_txt, color=status_chuva_col, className="w-100 mt-1 small badge-black-text")
 
-    # Badge de Umidade (Agora chamado de "Status Geral" para clareza)
     umidade_badge = dbc.Badge(status_umid_txt, color=status_umid_col, className="w-100 mt-1 small badge-black-text")
 
     # Envolve com Link (mantido)
@@ -230,7 +258,6 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         html.H6(config['nome'], className="text-center mb-1"),
         dbc.Row([
             dbc.Col([html.Div("Chuva (72h)", className="small text-center"), chuva_gauge, chuva_badge], width=6),
-            # Altera o título do gauge de "Umidade" para "Status Geral"
             dbc.Col([html.Div("Status Geral", className="small text-center"), umidade_gauge, umidade_badge], width=6),
         ], className="g-0"),
     ], className="km-summary-block")
@@ -243,23 +270,31 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
 
 
 # --- Callbacks 2a e 2b (Callbacks que USAM create_km_block) ---
-# (CORRIGIDOS para ler o status do dcc.Store)
 @app.callback(
     Output('map-summary-left-content', 'children'),
     [Input('store-dados-sessao', 'data'),
-     Input('store-ultimo-status', 'data')]  # <-- Ouve o status
+     Input('store-ultimo-status', 'data')]
 )
 def update_summary_left(dados_json, status_json):
     if not dados_json or not status_json:
         return dbc.Spinner(size="sm")
 
     try:
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
-        # Garante que as colunas existem (para o df_ponto)
-        if 'id_ponto' not in df_completo.columns:
-            df_completo = pd.DataFrame(columns=data_source.COLUNAS_HISTORICO)
+        # FAZ CÓPIA IMEDIATAMENTE APÓS LEITURA
+        df_completo = pd.read_json(StringIO(dados_json), orient='split').copy()
 
-        status_atual = json.loads(status_json)
+        if df_completo.empty or 'id_ponto' not in df_completo.columns:
+            return dbc.Alert("Dados indisponíveis (L).", color="warning", className="m-2 small")
+
+        # --- CORREÇÃO DE TIPAGEM FINAL: USANDO .LOC ---
+        df_completo.loc[:, 'timestamp'] = pd.to_datetime(df_completo['timestamp'], errors='coerce')
+        df_completo.loc[:, 'chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
+        df_completo.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_completo['precipitacao_acumulada_mm'],
+                                                                        errors='coerce')
+        df_completo = df_completo.dropna(subset=['timestamp']).copy()
+        # --- FIM DA CORREÇÃO DE TIPAGEM FINAL ---
+
+        status_atual = status_json
 
         left_blocks = []
         ids_esquerda = ["Ponto-C-KM74", "Ponto-D-KM81"]
@@ -267,11 +302,9 @@ def update_summary_left(dados_json, status_json):
         for id_ponto in ids_esquerda:
             if id_ponto in PONTOS_DE_ANALISE:
                 config = PONTOS_DE_ANALISE[id_ponto]
-                df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
-                # Pega o status do Ponto (do worker)
+                df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
                 status_ponto_txt = status_atual.get(id_ponto, "SEM DADOS")
 
-                # Envia os dados E o status
                 km_block = create_km_block(id_ponto, config, df_ponto, status_ponto_txt)
                 left_blocks.append(km_block)
 
@@ -279,26 +312,36 @@ def update_summary_left(dados_json, status_json):
                                                          className="m-2 small")
     except Exception as e:
         print(f"ERRO GERAL em update_summary_left: {e}")
-        traceback.print_exc()  # Adiciona traceback para debug
+        traceback.print_exc()
+        # O erro está no trace, mas é retornado para a interface
         return dbc.Alert(f"Erro ao carregar dados (L): {e}", color="danger", className="m-2 small")
 
 
 @app.callback(
     Output('map-summary-right-content', 'children'),
     [Input('store-dados-sessao', 'data'),
-     Input('store-ultimo-status', 'data')]  # <-- Ouve o status
+     Input('store-ultimo-status', 'data')]
 )
 def update_summary_right(dados_json, status_json):
     if not dados_json or not status_json:
         return dbc.Spinner(size="sm")
 
     try:
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
-        # Garante que as colunas existem (para o df_ponto)
-        if 'id_ponto' not in df_completo.columns:
-            df_completo = pd.DataFrame(columns=data_source.COLUNAS_HISTORICO)
+        # FAZ CÓPIA IMEDIATAMENTE APÓS LEITURA
+        df_completo = pd.read_json(StringIO(dados_json), orient='split').copy()
 
-        status_atual = json.loads(status_json)
+        if df_completo.empty or 'id_ponto' not in df_completo.columns:
+            return dbc.Alert("Dados indisponíveis (R).", color="warning", className="m-2 small")
+
+        # --- CORREÇÃO DE TIPAGEM FINAL: USANDO .LOC ---
+        df_completo.loc[:, 'timestamp'] = pd.to_datetime(df_completo['timestamp'], errors='coerce')
+        df_completo.loc[:, 'chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
+        df_completo.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_completo['precipitacao_acumulada_mm'],
+                                                                        errors='coerce')
+        df_completo = df_completo.dropna(subset=['timestamp']).copy()
+        # --- FIM DA CORREÇÃO DE TIPAGEM FINAL ---
+
+        status_atual = status_json
 
         right_blocks = []
         ids_direita = ["Ponto-A-KM67", "Ponto-B-KM72"]
@@ -306,11 +349,9 @@ def update_summary_right(dados_json, status_json):
         for id_ponto in ids_direita:
             if id_ponto in PONTOS_DE_ANALISE:
                 config = PONTOS_DE_ANALISE[id_ponto]
-                df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
-                # Pega o status do Ponto (do worker)
+                df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
                 status_ponto_txt = status_atual.get(id_ponto, "SEM DADOS")
 
-                # Envia os dados E o status
                 km_block = create_km_block(id_ponto, config, df_ponto, status_ponto_txt)
                 right_blocks.append(km_block)
 
@@ -318,6 +359,5 @@ def update_summary_right(dados_json, status_json):
                                                            className="m-2 small")
     except Exception as e:
         print(f"ERRO GERAL em update_summary_right: {e}")
-        traceback.print_exc()  # Adiciona traceback para debug
+        traceback.print_exc()
         return dbc.Alert(f"Erro ao carregar dados (R): {e}", color="danger", className="m-2 small")
-

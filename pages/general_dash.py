@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO - Importação de Frequência)
+# pages/general_dash.py (CORRIGIDO)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -11,17 +11,15 @@ from plotly.subplots import make_subplots
 
 # Importa o app central e helpers
 from app import app, TEMPLATE_GRAFICO_MODERNO
-# --- CORREÇÃO: Importando o nome correto da variável de frequência ---
 from config import PONTOS_DE_ANALISE, FREQUENCIA_API_SEGUNDOS
 import processamento
 
-# --- INÍCIO DA ALTERAÇÃO 1: Atualizar Mapa de Cores ---
 CORES_UMIDADE = {
     '1m': 'green',
-    '2m': '#FFD700',  # Amarelo Ouro
+    '2m': '#FFD700',
     '3m': 'red'
 }
-# --- FIM DA ALTERAÇÃO 1 ---
+
 
 # --- Layout da Página Geral ---
 def get_layout():
@@ -37,7 +35,7 @@ def get_layout():
                 dcc.Dropdown(
                     id='general-graph-time-selector',
                     options=opcoes_tempo,
-                    value=72,  # Mantém 72h como padrão
+                    value=72,
                     clearable=False,
                     searchable=False
                 ),
@@ -61,17 +59,24 @@ def update_general_dashboard(dados_json, selected_hours):
         return dbc.Spinner(size="lg", children="Carregando dados...")
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
+
+        # --- CORREÇÃO DE TIPAGEM: Garante que colunas chave são do tipo correto ---
         df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp'])
+        df_completo['chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
+        df_completo['umidade_1m_perc'] = pd.to_numeric(df_completo['umidade_1m_perc'], errors='coerce')
+        df_completo['umidade_2m_perc'] = pd.to_numeric(df_completo['umidade_2m_perc'], errors='coerce')
+        df_completo['umidade_3m_perc'] = pd.to_numeric(df_completo['umidade_3m_perc'], errors='coerce')
+        # --- FIM DA CORREÇÃO DE TIPAGEM ---
+
     except Exception as e:
         return dbc.Alert(f"Erro ao ler dados: {e}", color="danger")
 
     layout_geral = []
     for id_ponto, config in PONTOS_DE_ANALISE.items():
-        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
+        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: continue
 
         # Lógica de cálculo de pontos (baseada no selected_hours)
-        # --- USANDO O NOME CORRETO: FREQUENCIA_API_SEGUNDOS ---
         PONTOS_POR_HORA = int(60 / (FREQUENCIA_API_SEGUNDOS / 60))
         n_pontos_desejados = selected_hours * PONTOS_POR_HORA
         n_pontos_plot = min(n_pontos_desejados, len(df_ponto))
@@ -80,8 +85,7 @@ def update_general_dashboard(dados_json, selected_hours):
         df_chuva_72h_plot = df_chuva_72h_completo.tail(n_pontos_plot)
         n_horas_titulo = selected_hours
 
-        # Gráfico de Chuva (Mantido)
-        # ... (código mantido) ...
+        # Gráfico de Chuva
         fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
         fig_chuva.add_trace(go.Bar(x=df_ponto_plot['timestamp'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária',
                                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
@@ -101,20 +105,17 @@ def update_general_dashboard(dados_json, selected_hours):
         # Gráfico de Umidade
         df_umidade = df_ponto_plot.melt(id_vars=['timestamp'],
                                         value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
-                                        var_name='Sensor', value_name='Umidade Solo (%)')  # Alterado aqui
+                                        var_name='Sensor', value_name='Umidade Solo (%)')
 
-        # --- INÍCIO DA ALTERAÇÃO: Renomear sensores ---
         df_umidade['Sensor'] = df_umidade['Sensor'].replace({
             'umidade_1m_perc': '1m',
             'umidade_2m_perc': '2m',
             'umidade_3m_perc': '3m'
         })
-        # --- FIM DA ALTERAÇÃO ---
 
-        fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade Solo (%)', color='Sensor',  # Alterado aqui
-                              title=f"Umidade Solo - {config['nome']} ({n_horas_titulo}h)",  # Alterado aqui
-                              color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
-        # --- FIM DA ALTERAÇÃO 2 ---
+        fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade Solo (%)', color='Sensor',
+                              title=f"Umidade Solo - {config['nome']} ({n_horas_titulo}h)",
+                              color_discrete_map=CORES_UMIDADE)
 
         fig_umidade.update_traces(line=dict(width=3))
         fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
