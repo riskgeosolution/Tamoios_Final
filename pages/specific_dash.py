@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO: Nomenclatura para "Estação KM XX" em cards e gráficos)
+# pages/specific_dash.py (CORRIGIDO: Título do gráfico e eixo Y da Umidade)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -318,7 +318,9 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
 
         dbc.Col(dbc.Card(
             dbc.CardBody([
-                html.H5("Umidade (%)", className="mb-3"),
+                # --- ALTERAÇÃO 3: Título da Umidade ---
+                html.H5("Umidade do Solo (%)", className="mb-3"),
+                # --- FIM DA ALTERAÇÃO 3 ---
                 dbc.Row([
                     dbc.Col(
                         html.P([
@@ -413,7 +415,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
 
     fig_umidade = px.line(df_umidade, x='timestamp_local', y='Umidade (%)', color='Sensor',
                           # --- ALTERAÇÃO 2: TÍTULO DO GRÁFICO ---
-                          title=f"Variação da Umidade - Estação {config['nome']} ({n_horas_titulo}h)",
+                          title=f"Variação da Umidade do Solo - Estação {config['nome']} ({n_horas_titulo}h)",
                           # --- FIM DA ALTERAÇÃO 2 ---
                           color_discrete_map=CORES_UMIDADE)
     fig_umidade.update_traces(line=dict(width=3));
@@ -425,7 +427,10 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
                               # Ajustada a posição Y da legenda
                               legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
                               # Adicionado título do eixo X
-                              xaxis_title="Data e Hora")
+                              xaxis_title="Data e Hora",
+                              # --- ALTERAÇÃO 4: TÍTULO DO EIXO Y ---
+                              yaxis_title="Umidade do Solo (%)")
+    # --- FIM DA ALTERAÇÃO 4 ---
     # --- FIM DA ALTERAÇÃO ---
 
     # --- EIXO X (3 EM 3 HORAS, DIAGONAL) ---
@@ -637,7 +642,7 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, dados_json, stat
         })
 
         fig_umidade_pdf = px.line(df_umidade_pdf, x='timestamp_local', y='Umidade (%)', color='Sensor',
-                                  title=f"Variação da Umidade - Estação {config['nome']}",
+                                  title=f"Variação da Umidade do Solo - Estação {config['nome']}",
                                   color_discrete_map=CORES_UMIDADE)
         fig_umidade_pdf.update_layout(
             template=TEMPLATE_GRAFICO_MODERNO,
@@ -693,8 +698,6 @@ def generate_logs_pdf(n_clicks, logs_json, id_ponto):  # <-- Variável renomeada
         # Converte o conteúdo do store (logs_json) para uma lista de strings
         if isinstance(logs_json, str):
             logs_list = logs_json.split('\n')
-        elif isinstance(logs_json, list):
-            logs_list = logs_json
         else:
             logs_list = json.loads(logs_json)  # Fallback
 
@@ -719,4 +722,3 @@ def generate_logs_pdf(n_clicks, logs_json, id_ponto):  # <-- Variável renomeada
         print(f"ERRO CRÍTICO no Callback PDF de Logs:")
         traceback.print_exc()
         return dash.no_update
-# --- FIM DA ALTERAÇÃO ---

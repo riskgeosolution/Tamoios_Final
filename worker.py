@@ -1,4 +1,4 @@
-# worker.py (COMPLETO E CORRIGIDO: Lógica de Backfill para CSV)
+# worker.py (CORRIGIDO: Chamando a função 'calcular_acumulado_rolling')
 
 import pandas as pd
 import time
@@ -102,10 +102,13 @@ def main_loop():
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
 
-                # Cálculo do Acumulado (usando a função de processamento)
-                acumulado_72h_df = processamento.calcular_acumulado_72h(df_ponto)
+                # --- INÍCIO DA CORREÇÃO ---
+                # CORRIGIDO: Chamando a nova função com horas=72
+                acumulado_72h_df = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
+                # --- FIM DA CORREÇÃO ---
 
                 if not acumulado_72h_df.empty:
+                    # NOTA: O status é definido com base no *último* valor do acumulado de 72h
                     chuva_72h_final = acumulado_72h_df['chuva_mm'].iloc[-1]
                     status_ponto, _ = processamento.definir_status_chuva(chuva_72h_final)
                     status_atualizado[id_ponto] = status_ponto

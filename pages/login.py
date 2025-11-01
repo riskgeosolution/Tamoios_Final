@@ -1,4 +1,4 @@
-# pages/login.py (FINAL CORRIGIDO: Fundo com imagem CSS Inline)
+# pages/login.py (FINAL CORRIGIDO: Fundo do Card Transparente)
 
 import dash
 from dash import html, dcc
@@ -32,6 +32,7 @@ def get_layout():
     layout = dbc.Container([
         dbc.Row(
             dbc.Col(
+                # --- INÍCIO DA ALTERAÇÃO: Adicionado estilo de transparência ao Card ---
                 dbc.Card([
                     dbc.CardBody([
                         # --- Logos Lado a Lado (Espaçados) ---
@@ -93,15 +94,15 @@ def get_layout():
                         )
                         # --- FIM DA ALTERAÇÃO DO BOTÃO ---
                     ])
-                ]),
+                ], style={'backgroundColor': 'rgba(255, 255, 255, 0.8)'}),  # <<<< AQUI ESTÁ A ALTERAÇÃO
+                # --- FIM DA ALTERAÇÃO ---
+
                 width=12, md=10, lg=8
             ),
             justify="center",
             align="center",
             className="vh-100"
         )
-        # --- INÍCIO DA ALTERAÇÃO: Fundo CSS Inline ---
     ], fluid=True, style=style_fundo)
-    # --- FIM DA ALTERAÇÃO ---
 
     return layout
