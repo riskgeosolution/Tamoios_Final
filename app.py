@@ -1,17 +1,24 @@
-# app.py
+# app.py (CORRIGIDO: Forçando o carregamento do style.css local)
+
 import dash
 import dash_bootstrap_components as dbc
 
 # --- IMPORTAÇÃO CRÍTICA DO LEAFLET CSS ---
-# Este CSS é necessário para que o dl.Map (Leaflet) renderize corretamente
 LEAFLET_CSS = [
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
-    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" # Embora seja JS, muitas vezes é incluído aqui
+    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
 ]
 # --- FIM DA IMPORTAÇÃO CRÍTICA ---
 
 # Use um tema Bootstrap moderno.
 THEME = dbc.themes.FLATLY
+
+# --- INÍCIO DA ALTERAÇÃO ---
+# Dizemos explicitamente ao Dash para carregar o nosso style.css da pasta /assets
+MEU_CSS_LOCAL = [
+    "/assets/style.css"
+]
+# --- FIM DA ALTERAÇÃO ---
 
 # Meta tags para responsividade em celular
 META_TAGS = [
@@ -19,13 +26,10 @@ META_TAGS = [
 ]
 
 app = dash.Dash(__name__,
-                # --- CORREÇÃO: COMBINAR O TEMA COM O LEAFLET CSS ---
-                external_stylesheets=[THEME] + LEAFLET_CSS,
+                # --- CORREÇÃO: COMBINAR TODOS OS CSS ---
+                external_stylesheets=[THEME] + LEAFLET_CSS + MEU_CSS_LOCAL,
                 # --- FIM DA CORREÇÃO ---
                 meta_tags=META_TAGS,
-                # ESTA LINHA É A CORREÇÃO.
-                # Ela permite que o index.py controle callbacks de
-                # componentes que ainda não estão na tela (como 'login-button').
                 suppress_callback_exceptions=True
 )
 

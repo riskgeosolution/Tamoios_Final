@@ -1,4 +1,4 @@
-# worker.py (COMPLETO E CONSOLIDADO - CORRIGIDO AttributeError)
+# worker.py (COMPLETO E CORRIGIDO: Lógica de Backfill para CSV)
 
 import pandas as pd
 import time
@@ -42,7 +42,13 @@ def verificar_alertas(status_novos, status_antigos):
         status_antigo = status_antigos.get(id_ponto, "INDEFINIDO")
 
         if status_novo != status_antigo:
-            # Lógica real de alerta e log seria aqui.
+            # A lógica real de envio (alertas.enviar_alerta) é chamada aqui
+            # com base nas regras de transição.
+
+            # Exemplo (simplificado):
+            # if status_novo == "PARALIZAÇÃO" and status_antigo == "ALERTA":
+            #    alertas.enviar_alerta(id_ponto, PONTOS_DE_ANALISE[id_ponto]['nome'], status_novo, status_antigo)
+
             status_atualizado[id_ponto] = status_novo
 
     return status_atualizado
@@ -50,12 +56,12 @@ def verificar_alertas(status_novos, status_antigos):
 
 def main_loop():
     """
-    O loop principal que roda a cada 15 minutos (900s) e gerencia o DB.
+    O loop principal que roda a cada 15 minutos (900s) e usa o fluxo de arquivo CSV.
     """
     inicio_ciclo = time.time()
 
     try:
-        # 1. LER O HISTÓRICO E O STATUS ATUAL DO DB/DISCO
+        # 1. LER O HISTÓRICO ATUAL DO ARQUIVO CSV
         historico_df, status_antigos_do_disco, logs = data_source.get_all_data_from_disk()
 
         if not status_antigos_do_disco:
@@ -65,7 +71,22 @@ def main_loop():
 
         print(f"WORKER: Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
-        # 2. COLETAR NOVOS DADOS DA API e SALVAR OS NOVOS NO DB
+        # --- NOVO: LÓGICA DE BACKFILL (PREENCHIMENTO) PARA O PLANO PRO (KM 67) ---
+        # Verifica se o Ponto A (KM 67) tem dados. Se não tiver, busca o histórico.
+        if historico_df.empty or historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67'].empty:
+            print("[Worker] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
+            try:
+                # Chama a função de backfill (que salva no CSV)
+                data_source.backfill_km67_pro_data()
+                # Recarrega o histórico (agora com dados do KM 67)
+                historico_df, _, _ = data_source.get_all_data_from_disk()
+                print(f"[Worker] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
+            except Exception as e_backfill:
+                data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
+        # --- FIM DO BACKFILL ---
+
+        # 2. COLETAR NOVOS DADOS DA API (ENDPOINT /CURRENT PARA TODOS OS 4 PONTOS)
+        # Esta função faz a coleta, concatena e SALVA o arquivo de histórico.
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
         # 3. RECARREGAR O HISTÓRICO COMPLETO APÓS SALVAMENTO
@@ -81,6 +102,7 @@ def main_loop():
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
 
+                # Cálculo do Acumulado (usando a função de processamento)
                 acumulado_72h_df = processamento.calcular_acumulado_72h(df_ponto)
 
                 if not acumulado_72h_df.empty:
@@ -123,7 +145,9 @@ def main_loop():
 
 
 if __name__ == "__main__":
-    # [REMOVIDO] data_source.setup_disk_paths() <-- REMOVIDO PARA CORRIGIR AttributeError
+    # CHAMA A FUNÇÃO DE CONFIGURAÇÃO DE CAMINHO (RESTAURADA)
+    data_source.setup_disk_paths()
+
     print("--- Processo Worker Iniciado ---")
     data_source.adicionar_log("GERAL", "Processo Worker iniciado com sucesso.")
 

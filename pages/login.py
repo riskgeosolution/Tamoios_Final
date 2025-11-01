@@ -1,3 +1,5 @@
+# pages/login.py (FINAL CORRIGIDO: Fundo com imagem CSS Inline)
+
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
@@ -11,27 +13,45 @@ def get_layout():
     logo_riskgeo_path = app.get_asset_url('LogoMarca RiskGeo Solutions.png')
     logo_tamoios_path = app.get_asset_url('tamoios.png')
 
+    # --- NOVO: Obtém o caminho do fundo para CSS Inline ---
+    fundo_path = app.get_asset_url('tamoios_fundo.png')
+    # --- FIM DA ALTERAÇÃO ---
+
+    # Altura reduzida dos logos (Mantido)
+    nova_altura_logo = "90px"
+
+    # --- NOVO: Estilo de fundo Inline ---
+    style_fundo = {
+        'backgroundImage': f"url('{fundo_path}')",
+        'backgroundSize': 'cover',
+        'backgroundPosition': 'center',
+        'backgroundRepeat': 'no-repeat'
+    }
+    # --- FIM DA ALTERAÇÃO ---
+
     layout = dbc.Container([
         dbc.Row(
             dbc.Col(
                 dbc.Card([
                     dbc.CardBody([
-                        # --- 1. Logos Lado a Lado com Espaço ---
-                        dbc.Row([
-                            # Usando width="auto" para que a coluna se ajuste ao tamanho do logo
-                            dbc.Col(
-                                html.Img(src=logo_tamoios_path, height="112px"),
-                                width="auto"
-                            ),
-                            dbc.Col(
-                                html.Img(src=logo_riskgeo_path, height="112px"),
-                                width="auto"
-                            ),
-                        ],
-                        # justify="around" coloca espaço ao redor deles
-                        justify="around", # Isso vai adicionar o espaço entre eles
-                        align="center",
-                        className="mb-4 pt-3"),
+                        # --- Logos Lado a Lado (Espaçados) ---
+                        dbc.Row(
+                            [
+                                # Coluna 1: Logo Tamoios
+                                dbc.Col(
+                                    html.Img(src=logo_tamoios_path, height=nova_altura_logo),
+                                    width="auto"
+                                ),
+                                # Coluna 2: Logo RiskGeo
+                                dbc.Col(
+                                    html.Img(src=logo_riskgeo_path, height=nova_altura_logo),
+                                    width="auto"
+                                ),
+                            ],
+                            align="center",
+                            justify="around",
+                            className="mb-4 pt-3"
+                        ),
                         # --- FIM DA ALTERAÇÃO ---
 
                         html.H4("Sistema de Monitoramento", className="card-title text-center mb-4"),
@@ -39,51 +59,49 @@ def get_layout():
                         # Mensagem de erro (inicialmente vazia)
                         html.Div(id='login-error-output', className="text-danger mb-3 text-center"),
 
-                        # --- CAMPO DE SENHA (Diminuído e Centralizado) ---
+                        # --- Campo de senha menor (Mantido) ---
                         dbc.Row(
                             dbc.Col(
                                 dbc.Input(
-                                    id='input-password', # <-- ID CORRETO
+                                    id='input-password',
                                     type='password',
                                     placeholder='Digite sua senha',
-                                    n_submit=0  # Permite apertar Enter
+                                    n_submit=0
                                 ),
-                                # Diminui a largura da coluna (10 de 12 no celular, 8 de 12 no desktop)
                                 width=10,
-                                lg=8
+                                lg=6
                             ),
-                            justify="center", # Centraliza a coluna
-                            className="mb-4" # Margem que estava no Input
+                            justify="center",
+                            className="mb-4"
                         ),
                         # --- FIM DA ALTERAÇÃO ---
 
-                        # --- 2. Botão Acessar (Centralizado e Estilizado) ---
+                        # --- Botão Acessar (Mantido) ---
                         dbc.Row(
                             dbc.Col(
                                 dbc.Button(
                                     "Acessar",
-                                    id='btn-login', # <-- ID CORRETO
+                                    id='btn-login',
                                     color='primary',
-                                    # Removi w-100 e adicionei estilo
                                     style={'font-size': '1.1rem', 'font-weight': 'bold', 'padding': '0.5rem 2rem'},
                                     n_clicks=0
                                 ),
-                                width="auto" # Ocupa apenas o tamanho do botão
+                                width="auto"
                             ),
-                            justify="center", # Centraliza a coluna
-                            className="mb-3" # Margem inferior
+                            justify="center",
+                            className="mb-3"
                         )
                         # --- FIM DA ALTERAÇÃO DO BOTÃO ---
                     ])
                 ]),
-                # --- 3. Aumentando o card (a "parte branca") ---
-                width=12, md=8, lg=6 # Aumentado de md=6, lg=4
+                width=12, md=10, lg=8
             ),
             justify="center",
             align="center",
-            className="vh-100"  # Centraliza verticalmente na tela
+            className="vh-100"
         )
-    ], fluid=True, className="bg-light")  # Fundo claro para a página
+        # --- INÍCIO DA ALTERAÇÃO: Fundo CSS Inline ---
+    ], fluid=True, style=style_fundo)
+    # --- FIM DA ALTERAÇÃO ---
 
     return layout
-

@@ -1,62 +1,88 @@
-# processamento.py (FINAL CONSOLIDADO - ADICIONANDO LOGS)
+# processamento.py (CORRIGIDO: Função de acumulado reescrita para ser mais robusta)
 
 import pandas as pd
 import datetime
+import traceback  # Importar traceback
 
 # --- IMPORTS NECESSÁRIAS ---
-import data_source  # Necessário para ler o eventos.log
+import data_source
 # --- FIM IMPORTS NECESSÁRIAS ---
 
 # --- Importações Corrigidas ---
-# Importa TODAS as regras de negócio do config.py
 from config import (
     CHUVA_LIMITE_VERDE, CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA,
-    DELTA_TRIGGER_UMIDADE, RISCO_MAP, STATUS_MAP_HIERARQUICO
+    DELTA_TRIGGER_UMIDADE, RISCO_MAP, STATUS_MAP_HIERARQUICO,
+    FREQUENCIA_API_SEGUNDOS  # Importa a frequência
 )
 
 
-# --- FUNÇÃO calcular_acumulado_72h (Mantida) ---
-def calcular_acumulado_72h(df_ponto):
+# --- FUNÇÃO calcular_acumulado_rolling (MODIFICADA E MAIS ROBUSTA) ---
+def calcular_acumulado_rolling(df_ponto, horas=72):
     """
-    Calcula o acumulado de 72h (rolling) somando os valores de chuva incremental (chuva_mm).
+    Calcula o acumulado 'rolling' somando os valores de chuva incremental (chuva_mm)
+    para um número dinâmico de horas.
+    Esta versão é robusta a buracos nos dados E a múltiplos pontos.
     """
     if 'chuva_mm' not in df_ponto.columns or df_ponto.empty or 'timestamp' not in df_ponto.columns:
-        return pd.DataFrame(columns=['timestamp', 'chuva_mm'])
-    df = df_ponto.sort_values('timestamp').copy()
+        return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
+
+    df_original = df_ponto.sort_values('timestamp').copy()
 
     try:
-        # Garante que o timestamp seja o índice
-        if not pd.api.types.is_datetime64_any_dtype(df.index):
-            df = df.set_index('timestamp').copy()
+        # 1. Garantir que o timestamp é datetime e é o índice
+        df_original['timestamp'] = pd.to_datetime(df_original['timestamp'])
+        df_original = df_original.set_index('timestamp')
+        df_original['chuva_mm'] = pd.to_numeric(df_original['chuva_mm'], errors='coerce')
 
-            # Garante que não haja duplicatas no índice (pode causar erro no rolling)
-        df = df[~df.index.duplicated(keep='last')]
+        # --- INÍCIO DA ALTERAÇÃO (LÓGICA MAIS ROBUSTA) ---
 
-        # Garante que 'chuva_mm' é numérico para somar
-        df['chuva_mm'] = pd.to_numeric(df['chuva_mm'], errors='coerce').fillna(0)
+        lista_dfs_acumulados = []
+        PONTOS_POR_HORA = 3600 // FREQUENCIA_API_SEGUNDOS
+        window_size = int(horas * PONTOS_POR_HORA)
 
-        # **LÓGICA CRÍTICA DE ACUMULAÇÃO:** Soma a chuva_mm (incremental) na janela de 72h.
-        acumulado_72h = df['chuva_mm'].rolling(window='72h', min_periods=1).sum()
-        acumulado_72h = acumulado_72h.rename('chuva_mm')
-        return acumulado_72h.reset_index()
+        # 2. Define uma função interna para processar uma Série
+        def calcular_rolling_para_serie(serie_chuva):
+            # Resample para 15T para preencher buracos
+            df_resampled = serie_chuva.resample('15T').sum()
+            df_resampled = df_resampled.fillna(0)
+            # Calcula o rolling
+            acumulado = df_resampled.rolling(window=window_size, min_periods=1).sum()
+            return acumulado
+
+        # 3. Itera por cada ponto único no DataFrame
+        for ponto_id in df_original['id_ponto'].unique():
+            # Pega a Série de chuva apenas para este ponto
+            series_ponto = df_original[df_original['id_ponto'] == ponto_id]['chuva_mm']
+
+            # Calcula o acumulado para esta Série
+            acumulado_series = calcular_rolling_para_serie(series_ponto)
+
+            # Converte a Série de volta para um DataFrame
+            acumulado_df = acumulado_series.to_frame(name='chuva_mm')
+
+            # Adiciona a coluna 'id_ponto' de volta
+            acumulado_df['id_ponto'] = ponto_id
+
+            # Adiciona à lista
+            lista_dfs_acumulados.append(acumulado_df)
+
+        # 4. Concatena todos os resultados
+        df_final = pd.concat(lista_dfs_acumulados)
+
+        # 5. Retorna o DataFrame com as colunas 'timestamp', 'chuva_mm', 'id_ponto'
+        return df_final.reset_index()
+        # --- FIM DA ALTERAÇÃO ---
 
     except Exception as e:
-        print(f"Erro ao calcular acumulado 72h com rolling window: {e}")
-        try:
-            df = df.reset_index(drop=True)
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.set_index('timestamp')
-            df = df[~df.index.duplicated(keep='last')]
-            df['chuva_mm'] = pd.to_numeric(df['chuva_mm'], errors='coerce').fillna(0)
-            acumulado_72h = df['chuva_mm'].rolling(window='72h', min_periods=1).sum()
-            acumulado_72h = acumulado_72h.rename('chuva_mm')
-            return acumulado_72h.reset_index()
-        except Exception as e_inner:
-            print(f"Erro interno (e_inner) ao calcular acumulado 72h: {e_inner}")
-            return pd.DataFrame(columns=['timestamp', 'chuva_mm'])
+        print(f"Erro CRÍTICO ao calcular acumulado rolling: {e}")
+        traceback.print_exc()
+        return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
 
-# --- FUNÇÃO definir_status_chuva (Mantida, usa constantes importadas) ---
+# --- FIM DA ALTERAÇÃO ---
+
+
+# --- FUNÇÃO definir_status_chuva (ALTERADA LÓGICA >=) ---
 def definir_status_chuva(chuva_mm):
     """
     Define o status da chuva (LIVRE, ATENÇÃO, etc.)
@@ -66,12 +92,17 @@ def definir_status_chuva(chuva_mm):
     try:
         if pd.isna(chuva_mm):
             status_texto = "SEM DADOS"
-        elif chuva_mm > CHUVA_LIMITE_LARANJA:
+
+        # --- INÍCIO DA ALTERAÇÃO ---
+        # A lógica agora é >= para PARALIZAÇÃO
+        elif chuva_mm >= CHUVA_LIMITE_LARANJA:  # >= 100.0
             status_texto = "PARALIZAÇÃO"
-        elif chuva_mm > CHUVA_LIMITE_AMARELO:
+        elif chuva_mm > CHUVA_LIMITE_AMARELO:  # > 79.0
             status_texto = "ALERTA"
-        elif chuva_mm > CHUVA_LIMITE_VERDE:
+        elif chuva_mm > CHUVA_LIMITE_VERDE:  # > 60.0
             status_texto = "ATENÇÃO"
+        # --- FIM DA ALTERAÇÃO ---
+
         else:
             status_texto = "LIVRE"
         return status_texto, STATUS_MAP_CHUVA.get(status_texto, "secondary")

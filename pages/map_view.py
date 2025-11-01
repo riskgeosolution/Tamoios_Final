@@ -1,4 +1,4 @@
-# pages/map_view.py (FINAL CONSOLIDADO - COM INDENTAÇÃO CORRETA)
+# pages/map_view.py (CORRIGIDO: Nomenclatura para "Estação KM XX" nos pins e cards)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -15,7 +15,7 @@ from app import app
 # Importa constantes do config.py
 from config import PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO, CHUVA_LIMITE_VERDE, \
     CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA
-# O processamento.py ainda é usado para o cálculo da chuva (embora o status venha do worker)
+# O processamento.py agora usa a nova função
 import processamento
 import data_source  # Importa data_source para as colunas
 
@@ -33,12 +33,16 @@ def get_layout():  # <--- DEVE ESTAR NA COLUNA 1
                         children=[
                             dl.TileLayer(),
                             dl.LayerGroup(id='map-pins-layer'),  # Camada para pinos padrão
-                            dbc.Card([dbc.CardHeader("KM 74 & KM 81", className="text-center small py-1"),
-                                      dbc.CardBody(id='map-summary-left-content', children=[dbc.Spinner(size="sm")])],
-                                     className="map-summary-card map-summary-left"),
-                            dbc.Card([dbc.CardHeader("KM 67 & KM 72", className="text-center small py-1"),
-                                      dbc.CardBody(id='map-summary-right-content', children=[dbc.Spinner(size="sm")])],
-                                     className="map-summary-card map-summary-right")
+                            # --- INÍCIO DA ALTERAÇÃO 1 (TÍTULOS DOS CARDS LATERAIS) ---
+                            dbc.Card(
+                                [dbc.CardHeader("Estação KM 74 & Estação KM 81", className="text-center small py-1"),
+                                 dbc.CardBody(id='map-summary-left-content', children=[dbc.Spinner(size="sm")])],
+                                className="map-summary-card map-summary-left"),
+                            dbc.Card(
+                                [dbc.CardHeader("Estação KM 67 & Estação KM 72", className="text-center small py-1"),
+                                 dbc.CardBody(id='map-summary-right-content', children=[dbc.Spinner(size="sm")])],
+                                className="map-summary-card map-summary-right")
+                            # --- FIM DA ALTERAÇÃO 1 ---
                         ],
                         style={'width': '100%', 'height': '80vh', 'min-height': '600px'}
                     ),
@@ -101,20 +105,24 @@ def update_map_pins(dados_json):
 
     pinos_do_mapa = []
 
+    # --- INÍCIO DA CORREÇÃO (Pino do Mapa) ---
+    # Precisamos recalcular o acumulado de 72h para os pinos
+    df_acumulado_completo = processamento.calcular_acumulado_rolling(df_completo, horas=72)
+    # Pega o último valor acumulado de cada ponto
+    df_acumulado_ultimo = df_acumulado_completo.groupby('id_ponto').last().reset_index()
+    # --- FIM DA CORREÇÃO ---
+
     # Itera sobre os PONTOS DE ANALISE (do config.py)
     for id_ponto, config in PONTOS_DE_ANALISE.items():
 
         # Pega os dados deste ponto no último timestamp
-        dados_ponto = df_ultimo[df_ultimo['id_ponto'] == id_ponto]
+        dados_ponto_acumulado = df_acumulado_ultimo[df_acumulado_ultimo['id_ponto'] == id_ponto]
 
         chuva_72h_pino = 0.0
 
-        if dados_ponto.empty:
-            chuva_72h_pino = 0.0
-        else:
+        if not dados_ponto_acumulado.empty:
             try:
-                # O .get lida melhor com valores pd.NA
-                chuva_72h_pino = dados_ponto.iloc[0].get('precipitacao_acumulada_mm', 0.0)
+                chuva_72h_pino = dados_ponto_acumulado.iloc[0].get('chuva_mm', 0.0)
                 if pd.isna(chuva_72h_pino):
                     chuva_72h_pino = 0.0
             except Exception as e:
@@ -125,9 +133,10 @@ def update_map_pins(dados_json):
         pino = dl.Marker(
             position=config['lat_lon'],
             children=[
-                dl.Tooltip(config['nome']),
+                # Altera tooltip e popup para incluir "Estação"
+                dl.Tooltip(f"Estação {config['nome']}"),
                 dl.Popup([
-                    html.H5(config['nome']),
+                    html.H5(f"Estação {config['nome']}"),  # Título do popup
                     html.P(f"Chuva (72h): {chuva_72h_pino:.1f} mm"),
                     dbc.Button("Ver Dashboard", href=f"/ponto/{id_ponto}", size="sm", color="primary")
                 ])
@@ -198,8 +207,8 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
             if 'chuva_mm' in df_ponto.columns:
                 df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
 
-            # Pega o último dado de chuva acumulada (apenas para o NÚMERO no gauge)
-            df_chuva_72h = processamento.calcular_acumulado_72h(df_ponto)
+            # Chama a nova função 'calcular_acumulado_rolling' com 72 horas
+            df_chuva_72h = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
 
             if not df_chuva_72h.empty:
                 chuva_val = df_chuva_72h.iloc[-1]['chuva_mm']
@@ -255,7 +264,9 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     # Envolve com Link (mantido)
     link_destino = f"/ponto/{id_ponto}"
     conteudo_bloco = html.Div([
-        html.H6(config['nome'], className="text-center mb-1"),
+        # --- INÍCIO DA ALTERAÇÃO 2 (NOME DO PONTO NO CARTÃO) ---
+        html.H6(f"Estação {config['nome']}", className="text-center mb-1"),
+        # --- FIM DA ALTERAÇÃO 2 ---
         dbc.Row([
             dbc.Col([html.Div("Chuva (72h)", className="small text-center"), chuva_gauge, chuva_badge], width=6),
             dbc.Col([html.Div("Status Geral", className="small text-center"), umidade_gauge, umidade_badge], width=6),

@@ -89,3 +89,4 @@ cython_debug/
 .vscode/
 # Arquivos específicos de IDEs
 .idea/
+temp_local_db.db

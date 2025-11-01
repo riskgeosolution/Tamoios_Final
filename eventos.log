@@ -130,3 +130,291 @@
 2025-10-31T03:20:35.977848+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
 2025-10-31T03:20:35.978074+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
 2025-10-31T03:20:35.978287+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:40:50.588498+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T13:40:52.768568+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:40:52.769249+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:40:52.769603+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:40:52.769850+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:40:52.809160+00:00 | GERAL | ERRO CRÍTICO (loop principal): unhashable type: 'dict'
+2025-10-31T13:42:00.573801+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T13:42:02.245414+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:42:02.246046+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:42:02.246324+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:42:02.246589+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:53:11.228018+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T13:53:12.912722+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:53:12.913164+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:53:12.913458+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:53:12.913746+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API): API retornou erro: Erro desconhecido
+2025-10-31T13:58:01.864292+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T13:58:03.984016+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T13:58:03.984719+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T13:58:03.985260+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T13:58:03.985794+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:02:47.892698+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T14:02:48.992558+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (400): Falha ao coletar histórico.
+2025-10-31T14:02:50.448413+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:02:50.448907+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:02:50.449162+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:02:50.449376+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:20:28.783177+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T14:20:29.969346+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (400): Falha ao coletar histórico.
+2025-10-31T14:20:31.479831+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:20:31.480296+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:20:31.480521+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T14:20:31.480727+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:33:54.933240+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:33:54.933752+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:33:54.934146+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:33:54.934455+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:48:54.944789+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:48:54.945812+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:48:54.948545+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T18:48:54.948910+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:01:35.840591+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:01:38.187209+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:01:38.187833+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:01:38.188157+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:01:38.188394+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:06:25.278901+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:06:26.364714+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (400): Falha ao coletar histórico.
+2025-10-31T19:06:27.799663+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:06:27.800150+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:06:27.800398+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:06:27.800595+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:08:42.624997+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:08:44.330720+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:08:44.331268+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:08:44.331542+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:08:44.331734+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:09:14.040478+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:09:15.063430+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (401): Falha ao coletar histórico.
+2025-10-31T19:09:16.491763+00:00 | Ponto-A-KM67 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:09:16.492406+00:00 | Ponto-B-KM72 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:09:16.492684+00:00 | Ponto-C-KM74 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:09:16.492923+00:00 | Ponto-D-KM81 | ERRO HTTP (401): Falha ao coletar dados. Verifique credenciais.
+2025-10-31T19:14:25.739790+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:14:27.528319+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:14:27.528786+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:14:27.529082+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:14:27.529326+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:16:11.296287+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:16:12.417453+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (400): Falha ao coletar histórico.
+2025-10-31T19:16:12.418243+00:00 | Ponto-A-KM67 | Resposta da API: {"code":"400","message":"Time range requested exceeds maximum of 86400 seconds"}
+2025-10-31T19:16:13.891169+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:16:13.891783+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:16:13.892025+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:16:13.892267+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:18:26.980967+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:18:28.027442+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (401): Falha ao coletar histórico.
+2025-10-31T19:18:28.028110+00:00 | Ponto-A-KM67 | Resposta da API: {"code":"401","message":"Invalid API Signature."}
+2025-10-31T19:18:29.518056+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:18:29.518668+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:18:29.518875+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:18:29.519085+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:20:41.139220+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T19:20:42.345793+00:00 | Ponto-A-KM67 | ERRO HTTP (Backfill) (400): Falha ao coletar histórico.
+2025-10-31T19:20:42.346493+00:00 | Ponto-A-KM67 | Resposta da API: {"code":"400","message":"Time range requested exceeds maximum of 86400 seconds"}
+2025-10-31T19:20:43.765858+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:20:43.766455+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:20:43.766714+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T19:20:43.766956+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:07:56.662843+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:07:56.663671+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:07:56.664183+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:07:56.664511+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:09:41.799753+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T20:09:43.092134+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (Backfill): API (Backfill Bloco 1) retornou erro: Erro desconhecido
+2025-10-31T20:09:44.550469+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:09:44.551011+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:09:44.551247+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:09:44.551459+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:11:39.358649+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T20:11:40.614129+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (Backfill): name 'time' is not defined
+2025-10-31T20:11:42.064067+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:11:42.064631+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:11:42.064895+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:11:42.065139+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:13:28.666289+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T20:13:32.449135+00:00 | Ponto-A-KM67 | AVISO (Backfill): API não retornou dados históricos (JSON vazio).
+2025-10-31T20:13:33.896591+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:13:33.897159+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:13:33.897412+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:13:33.897652+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:15:37.254251+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T20:15:41.104582+00:00 | Ponto-A-KM67 | SUCESSO (Backfill): 287 registros históricos de 72h (3x 24h) salvos.
+2025-10-31T20:15:42.596887+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:15:42.597479+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:15:42.597742+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:15:42.597958+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:30:39.233974+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:30:39.234482+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:30:39.234713+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:30:39.234925+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:45:39.522908+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:45:39.523657+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:45:39.524155+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T20:45:39.532304+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:00:39.042648+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:00:39.043162+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:00:39.043420+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:00:39.043645+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:25:31.014689+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:25:31.015414+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:25:31.016441+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:25:31.017209+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:40:31.540837+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:40:31.549112+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:40:31.550077+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:40:31.550836+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:55:31.260320+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:55:31.260883+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:55:31.261231+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T21:55:31.261444+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T22:00:56.980366+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-10-31T22:01:00.875648+00:00 | Ponto-A-KM67 | SUCESSO (Backfill): 288 registros históricos de 72h (3x 24h) salvos.
+2025-10-31T22:01:02.491306+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T22:01:02.492011+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T22:01:02.492632+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-10-31T22:01:02.492942+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:40:35.012948+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-01T01:40:36.980485+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:40:36.981385+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:40:36.981749+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:40:36.982032+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:55:36.959721+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:55:36.960282+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:55:36.960598+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T01:55:36.960871+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:10:36.790311+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:10:36.790756+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:10:36.791050+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:10:36.791284+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:25:36.820305+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:25:36.820847+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:25:36.821072+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:25:36.821284+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:40:36.757833+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:40:36.758451+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:40:36.758731+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:40:36.758950+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:55:36.728525+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:55:36.729119+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:55:36.729469+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T02:55:36.729989+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:10:36.707491+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:10:36.717442+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:10:36.717685+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:10:36.717895+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:25:36.716307+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:25:36.716858+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:25:36.717199+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:25:36.717523+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:40:36.702663+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:40:36.703221+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:40:36.703533+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:40:36.703822+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:55:36.680489+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:55:36.681078+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:55:36.681344+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T03:55:36.681612+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:10:36.723908+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:10:36.724494+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:10:36.724790+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:10:36.725107+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:25:36.719042+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:25:36.719617+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:25:36.722090+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:25:36.723153+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:40:36.700890+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:40:36.701371+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:40:36.701722+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:40:36.701956+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:55:36.758114+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:55:36.758739+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:55:36.759082+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T04:55:36.759549+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:10:36.707887+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:10:36.708558+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:10:36.708909+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:10:36.709247+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:25:36.648208+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:25:36.648790+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:25:36.649062+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:25:36.649302+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:40:36.667348+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:40:36.668015+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:40:36.668343+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:40:36.668591+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:55:36.632424+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:55:36.633042+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:55:36.633303+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T05:55:36.633548+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:10:36.704296+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:10:36.704915+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:10:36.705156+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:10:36.705420+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:25:36.690723+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:25:36.691395+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:25:36.691675+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:25:36.691918+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:40:36.719616+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:40:36.720157+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:40:36.720422+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:40:36.720684+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:55:36.622756+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:55:36.623424+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:55:36.623680+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T06:55:36.623945+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:10:36.649293+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:10:36.649919+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:10:36.650182+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:10:36.650427+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:25:37.292970+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:25:37.294091+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:25:37.294876+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:25:37.295622+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:40:36.642513+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:40:36.643074+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:40:36.643331+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:40:36.643645+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:55:36.692417+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:55:36.693072+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:55:36.693483+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T07:55:36.693877+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:10:36.717239+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:10:36.717835+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:10:36.718111+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:10:36.718351+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:25:36.787510+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:25:36.788067+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:25:36.788354+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:25:36.788916+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:40:36.931368+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:40:36.931837+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:40:36.932093+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:40:36.934004+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:55:37.195584+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:55:37.197294+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:55:37.197722+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T08:55:37.198325+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:10:37.105766+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:10:37.106428+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:10:37.106785+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:10:37.107093+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:25:37.496874+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:25:37.497811+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:25:37.498619+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:25:37.499520+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:40:37.169635+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:40:37.170351+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:40:37.170854+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:40:37.171320+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:55:37.191221+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:55:37.191653+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:55:37.191917+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T09:55:37.192136+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T10:10:37.215520+00:00 | Ponto-A-KM67 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T10:10:37.216101+00:00 | Ponto-B-KM72 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T10:10:37.216505+00:00 | Ponto-C-KM74 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido
+2025-11-01T10:10:37.216879+00:00 | Ponto-D-KM81 | ERRO CRÍTICO (API /current): API retornou erro: Erro desconhecido

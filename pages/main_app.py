@@ -1,3 +1,5 @@
+# pages/main_app.py (CORRIGIDO: Otimização da Navbar para caber o botão Sair)
+
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
@@ -12,7 +14,10 @@ def get_navbar():
     logo_riskgeo_path = app.get_asset_url('LogoMarca RiskGeo Solutions.png')
     logo_tamoios_path = app.get_asset_url('tamoios.png')
     cor_fundo_navbar = '#003366'
-    nova_altura_logo = "60px"
+
+    # --- INÍCIO DA ALTERAÇÃO 1: Redução da Altura do Logo ---
+    nova_altura_logo = "50px"  # Era 60px
+    # --- FIM DA ALTERAÇÃO ---
 
     navbar = dbc.Navbar(
         dbc.Container(
@@ -33,8 +38,11 @@ def get_navbar():
                             width="auto",
                         ),
                         dbc.Col(
+                            # --- INÍCIO DA ALTERAÇÃO 2: Redução da Fonte do Título ---
                             html.H4("SISTEMA DE MONITORAMENTO TAMOIOS", className="mb-0 text-center",
-                                    style={'fontWeight': 'bold', 'color': 'white'}),
+                                    style={'fontWeight': 'bold', 'color': 'white', 'font-size': '1.3rem'}),
+                            # Reduzido o tamanho da fonte
+                            # --- FIM DA ALTERAÇÃO ---
                             width="auto",
                         ),
                         dbc.Col(
@@ -42,13 +50,14 @@ def get_navbar():
                                 [
                                     dbc.NavItem(
                                         dbc.NavLink("Mapa Geral", href="/", active="exact", className="text-light",
-                                                    style={'font-size': '1.75rem', 'font-weight': '500'})),
+                                                    style={'font-size': '1.0rem', 'font-weight': '500'})),
+                                    # Reduzido o tamanho da fonte
                                     dbc.NavItem(dbc.NavLink("Dashboard Geral", href="/dashboard-geral", active="exact",
                                                             className="text-light ms-3",
-                                                            style={'font-size': '1.75rem', 'font-weight': '500'})),
+                                                            style={'font-size': '1.0rem', 'font-weight': '500'})),
+                                    # Reduzido o tamanho da fonte
 
-                                    # --- CORREÇÃO DO LOGOUT ---
-                                    # Garante que o ID 'logout-button' está correto
+                                    # --- CORREÇÃO DO LOGOUT (Mantido) ---
                                     dbc.NavItem(
                                         dbc.Button(
                                             "Sair",
@@ -57,7 +66,7 @@ def get_navbar():
                                             className="ms-5",
                                             n_clicks=0
                                         ),
-                                        className="d-flex align-items-center"  # Alinha o botão
+                                        className="d-flex align-items-center"
                                     )
                                     # --- FIM DA CORREÇÃO ---
                                 ],
@@ -84,7 +93,6 @@ def get_navbar():
 def get_layout():
     """ Retorna o layout principal do app (depois do login). """
 
-    # --- INÍCIO DA CORREÇÃO DEFINITIVA (Removido dcc.Location) ---
     # O dcc.Location(id='url-app') foi REMOVIDO daqui.
     # O único dcc.Location(id='url-raiz') no index.py controlará tudo.
     layout = html.Div([
@@ -99,4 +107,3 @@ def get_layout():
     # --- FIM DA CORREÇÃO ---
 
     return layout
-

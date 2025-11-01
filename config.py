@@ -1,4 +1,4 @@
-# config.py (CORRIGIDO: Conexão DB e Mapeamento Multi-API)
+# config.py (CORRIGIDO: Limites de chuva atualizados)
 
 import os
 import datetime
@@ -71,9 +71,13 @@ PONTOS_DE_ANALISE = {
 }
 
 # --- Regras de Negócio (Alertas) ---
-CHUVA_LIMITE_VERDE = 50.0
-CHUVA_LIMITE_AMARELO = 69.0
-CHUVA_LIMITE_LARANJA = 89.0
+
+# --- INÍCIO DA ALTERAÇÃO (NOVOS LIMITES DE CHUVA) ---
+CHUVA_LIMITE_VERDE = 60.0   # Limite para LIVRE (Era 50.0)
+CHUVA_LIMITE_AMARELO = 79.0 # Limite para ATENÇÃO (Era 69.0)
+CHUVA_LIMITE_LARANJA = 100.0 # Limite para ALERTA (Era 89.0)
+# --- FIM DA ALTERAÇÃO ---
+
 DELTA_TRIGGER_UMIDADE = 3.0
 RISCO_MAP = {
     "LIVRE": 0,

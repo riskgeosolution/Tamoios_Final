@@ -1,4 +1,11 @@
-/* assets/style.css */
+/* assets/style.css (COMPLETO E CORRIGIDO) */
+
+/* --- NOVO: Fundo azul suave para a página de login --- */
+.bg-gemini-blue {
+    background-color: #e6f0ff !important; /* Azul Gemini suave */
+}
+/* --- FIM DA ALTERAÇÃO --- */
+
 
 /* ... (Estilos gerais, cards, gauges, etc. mantidos) ... */
 body { font-family: 'Roboto', sans-serif; background-color: #f8f9fa; }
@@ -48,7 +55,3 @@ h1, h2, h3, h4, h5, h6 { color: #343a40; margin-bottom: 0.5rem; }
     color: #000 !important;
 }
 /* --- FIM DA NOVA CORREÇÃO --- */
-
-
-/* (Estilos dos pinos removidos, conforme última reversão) */
-

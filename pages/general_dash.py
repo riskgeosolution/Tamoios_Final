@@ -1,4 +1,4 @@
-# pages/general_dash.py (FINAL CONSOLIDADO - CORRIGIDO NameError: df_umidade)
+# pages/general_dash.py (CORRIGIDO: Nomenclatura para "Estação KM XX" nos títulos)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -88,25 +88,35 @@ def update_general_dashboard(dados_json, selected_hours):
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: continue
 
-        # Lógica de cálculo de pontos
-        PONTOS_POR_HORA = int(60 / (FREQUENCIA_API_SEGUNDOS / 60))
-        n_pontos_desejados = selected_hours * PONTOS_POR_HORA
-        n_pontos_plot = min(n_pontos_desejados, len(df_ponto))
-        df_ponto_plot = df_ponto.tail(n_pontos_plot)
-
-        # Acumulado (chama processamento.py, que retorna apenas 'timestamp' e 'chuva_mm')
-        df_chuva_72h_completo = processamento.calcular_acumulado_72h(df_ponto)
-        df_chuva_72h_plot = df_chuva_72h_completo.tail(n_pontos_plot)
+        # --- INÍCIO DA CORREÇÃO (FILTRO DE TEMPO) ---
+        # Em vez de usar .tail(), filtramos pelo período de tempo real
+        ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
+        limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
+        df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
         n_horas_titulo = selected_hours
+        # --- FIM DA CORREÇÃO ---
 
-        # --- CORREÇÃO: ADICIONAR TIMESTAMP LOCAL AO DF DE ACUMULADO ---
-        if 'timestamp' in df_chuva_72h_plot.columns:
-            if df_chuva_72h_plot['timestamp'].dt.tz is None:
-                df_chuva_72h_plot['timestamp'] = df_chuva_72h_plot['timestamp'].dt.tz_localize('UTC')
+        # --- INÍCIO DA ALTERAÇÃO (CÁLCULO DINÂMICO) ---
+        # 1. Calcula o acumulado DINÂMICO para o Gráfico (baseado no selected_hours)
+        df_chuva_acumulada_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
 
-            df_chuva_72h_plot['timestamp_local'] = df_chuva_72h_plot['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        # 2. Filtra o DataFrame do gráfico para o período de tempo
+        df_chuva_acumulada_plot = df_chuva_acumulada_completo[
+            df_chuva_acumulada_completo['timestamp'] >= df_ponto_plot['timestamp'].min()
+            ].copy()
+        # --- FIM DA ALTERAÇÃO ---
+
+        # --- INÍCIO DA CORREÇÃO (SettingWithCopyWarning) ---
+        # Corrigindo com .loc
+        if 'timestamp' in df_chuva_acumulada_plot.columns:
+            if df_chuva_acumulada_plot['timestamp'].dt.tz is None:
+                df_chuva_acumulada_plot.loc[:, 'timestamp'] = df_chuva_acumulada_plot['timestamp'].dt.tz_localize('UTC')
+
+            df_chuva_acumulada_plot.loc[:, 'timestamp_local'] = df_chuva_acumulada_plot['timestamp'].dt.tz_convert(
+                'America/Sao_Paulo')
         else:
-            df_chuva_72h_plot['timestamp_local'] = df_chuva_72h_plot['timestamp']
+            # Este else é seguro, pois 'timestamp_local' já existe
+            df_chuva_acumulada_plot.loc[:, 'timestamp_local'] = df_chuva_acumulada_plot['timestamp']
         # --- FIM DA CORREÇÃO ---
 
         # Gráfico de Chuva
@@ -116,27 +126,41 @@ def update_general_dashboard(dados_json, selected_hours):
         fig_chuva.add_trace(
             go.Bar(x=df_ponto_plot['timestamp_local'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária',
                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+
+        # --- INÍCIO DA ALTERAÇÃO (GRÁFICO DINÂMICO) ---
         fig_chuva.add_trace(
-            go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
+            go.Scatter(x=df_chuva_acumulada_plot['timestamp_local'], y=df_chuva_acumulada_plot['chuva_mm'],
+                       name=f'Acumulada ({selected_hours}h)',  # Nome dinâmico
                        mode='lines', line=dict(color='#007BFF', width=2.5)), secondary_y=True)
-        # --- FIM DO USO ---
+        # --- FIM DA ALTERAÇÃO ---
 
-        fig_chuva.update_layout(title_text=f"Pluviometria - {config['nome']} ({n_horas_titulo}h)",
-                                template=TEMPLATE_GRAFICO_MODERNO,
-                                margin=dict(l=40, r=20, t=50, b=40),
-                                legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor='center', x=0.5),
-                                yaxis_title="Pluv. Horária (mm)",
-                                yaxis2_title="Acumulada (mm)",
-                                hovermode="x unified", bargap=0.1)
+        # --- INÍCIO DA ALTERAÇÃO (LEGENDA, MARGEM E TÍTULO DO EIXO) ---
+        fig_chuva.update_layout(
+            # --- ALTERAÇÃO 1: TÍTULO DO GRÁFICO ---
+            title_text=f"Pluviometria - Estação {config['nome']} ({n_horas_titulo}h)",
+            # --- FIM DA ALTERAÇÃO 1 ---
+            template=TEMPLATE_GRAFICO_MODERNO,
+            # Aumentada a margem inferior (b=80)
+            margin=dict(l=40, r=20, t=50, b=80),
+            # Ajustada a posição Y da legenda para -0.5 (mais para baixo)
+            legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
+            # Adicionado título do eixo X
+            xaxis_title="Data e Hora",
+            yaxis_title="Pluv. Horária (mm)",
+            yaxis2_title=f"Acumulada ({selected_hours}h)",  # Título do eixo dinâmico
+            hovermode="x unified", bargap=0.1)
+        # --- FIM DA ALTERAÇÃO ---
 
-        # --- CORREÇÃO CRÍTICA: FORÇAR TICKS DE 15 MINUTOS NO EIXO X ---
+        # --- EIXO X (3 EM 3 HORAS, DIAGONAL) ---
         fig_chuva.update_xaxes(
-            dtick=15 * 60 * 1000,  # 15 minutos em milissegundos
-            tickformat="%H:%M"  # Formato de hora:minuto
+            dtick=3 * 60 * 60 * 1000,  # 3 horas em milissegundos
+            tickformat="%d/%m %Hh",  # Formato Dia/Mês Hora
+            tickangle=-45  # Rotaciona os labels
         )
+        # --- FIM DA ALTERAÇÃO ---
 
         fig_chuva.update_yaxes(title_text="Pluv. Horária (mm)", secondary_y=False);
-        fig_chuva.update_yaxes(title_text="Acumulada (mm)", secondary_y=True)
+        fig_chuva.update_yaxes(title_text=f"Acumulada ({selected_hours}h)", secondary_y=True)  # Título do eixo dinâmico
 
         # --- REINSERÇÃO: GRÁFICO DE UMIDADE ---
         df_umidade = df_ponto_plot.melt(id_vars=['timestamp_local'],
@@ -150,13 +174,31 @@ def update_general_dashboard(dados_json, selected_hours):
         })
 
         fig_umidade = px.line(df_umidade, x='timestamp_local', y='Umidade Solo (%)', color='Sensor',
-                              title=f"Umidade Solo - {config['nome']} ({n_horas_titulo}h)",
+                              # --- ALTERAÇÃO 2: TÍTULO DO GRÁFICO ---
+                              title=f"Umidade Solo - Estação {config['nome']} ({n_horas_titulo}h)",
+                              # --- FIM DA ALTERAÇÃO 2 ---
                               color_discrete_map=CORES_UMIDADE)
         # --- FIM DA REINSERÇÃO ---
 
         fig_umidade.update_traces(line=dict(width=3))
-        fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
-                                  legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+
+        # --- INÍCIO DA ALTERAÇÃO (LEGENDA, MARGEM E TÍTULO DO EIXO) ---
+        fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO,
+                                  # Aumentada a margem inferior (b=80)
+                                  margin=dict(l=40, r=20, t=40, b=80),
+                                  # Ajustada a posição Y da legenda
+                                  legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
+                                  # Adicionado título do eixo X
+                                  xaxis_title="Data e Hora")
+        # --- FIM DA ALTERAÇÃO ---
+
+        # --- EIXO X (3 EM 3 HORAS, DIAGONAL) ---
+        fig_umidade.update_xaxes(
+            dtick=3 * 60 * 60 * 1000,  # 3 horas em milissegundos
+            tickformat="%d/%m %Hh",  # Formato Dia/Mês Hora
+            tickangle=-45  # Rotaciona os labels
+        )
+        # --- FIM DA ALTERAÇÃO ---
 
         # Layout Lado a Lado
         col_chuva = dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, lg=6,
