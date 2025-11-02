@@ -1,1 +1,184 @@
-[
+[2025-11-02T03:23:44.489866+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:23:44.490433+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:23:44.490710+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:23:44.490953+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:38:44.453911+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:38:44.454411+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:38:44.454683+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:38:44.454930+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:53:44.531941+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:53:44.532464+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:53:44.532740+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T03:53:44.532981+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:08:44.428245+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:08:44.428690+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:08:44.428960+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:08:44.429219+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:23:44.486387+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:23:44.486866+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:23:44.487158+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:23:44.487397+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:38:44.389917+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:38:44.390426+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:38:44.390689+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:38:44.390924+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:53:44.436782+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:53:44.437282+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:53:44.437539+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T04:53:44.437786+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:08:44.403826+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:08:44.404356+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:08:44.404654+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:08:44.404932+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:23:44.395305+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:23:44.395911+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:23:44.396349+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:23:44.396734+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:38:44.383295+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:38:44.383839+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:38:44.384110+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:38:44.384373+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:53:44.431007+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:53:44.431464+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:53:44.431723+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T05:53:44.431969+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:08:44.453913+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:08:44.454404+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:08:44.454682+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:08:44.454964+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:23:44.407418+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:23:44.407901+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:23:44.408194+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:23:44.408433+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:38:44.391868+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:38:44.392514+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:38:44.392872+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:38:44.393129+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:53:44.428799+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:53:44.429292+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:53:44.429569+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T06:53:44.429833+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:08:44.425116+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:08:44.425672+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:08:44.425954+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:08:44.426235+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:23:44.426100+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:23:44.426525+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:23:44.426763+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:23:44.426996+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:38:44.398392+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:38:44.398842+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:38:44.399178+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:38:44.399628+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:53:44.439375+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:53:44.439781+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:53:44.440023+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T07:53:44.440234+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:08:44.402559+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:08:44.403036+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:08:44.403321+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:08:44.403561+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:23:44.413875+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:23:44.414339+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:23:44.414615+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:23:44.414897+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:38:44.432976+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:38:44.433487+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:38:44.433845+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:38:44.434091+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:53:44.469016+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:53:44.469507+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:53:44.469764+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T08:53:44.470064+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:08:44.410475+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:08:44.410932+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:08:44.411222+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:08:44.411446+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:23:44.416271+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:23:44.416764+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:23:44.417061+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:23:44.417326+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:38:44.411190+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:38:44.411703+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:38:44.412002+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:38:44.412264+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:53:44.427839+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:53:44.428375+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:53:44.428676+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T09:53:44.428959+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:08:44.410439+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:08:44.410937+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:08:44.411222+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:08:44.411522+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:23:44.392857+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:23:44.393289+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:23:44.393560+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:23:44.393838+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:38:44.429341+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:38:44.429804+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:38:44.430094+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:38:44.430336+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:53:44.456157+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:53:44.456598+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:53:44.456872+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T10:53:44.457068+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:08:44.418287+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:08:44.418775+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:08:44.419047+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:08:44.419322+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:23:44.440667+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:23:44.441147+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:23:44.441416+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:23:44.441667+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:38:44.412741+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:38:44.413200+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:38:44.413434+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:38:44.413650+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:53:44.486897+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:53:44.487430+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:53:44.487726+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T11:53:44.487979+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva incremental: 0.00mm
+2025-11-02T12:02:59.943241+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:03:01.853707+00:00 | Ponto-A-KM67 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:03:01.854125+00:00 | Ponto-B-KM72 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:03:01.854385+00:00 | Ponto-C-KM74 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:03:01.854627+00:00 | Ponto-D-KM81 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:08:18.262709+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:08:19.956794+00:00 | Ponto-A-KM67 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:08:19.957405+00:00 | Ponto-B-KM72 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:08:19.957707+00:00 | Ponto-C-KM74 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:08:19.957953+00:00 | Ponto-D-KM81 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:23:20.074374+00:00 | Ponto-A-KM67 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:23:20.075221+00:00 | Ponto-B-KM72 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:23:20.075457+00:00 | Ponto-C-KM74 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:23:20.075700+00:00 | Ponto-D-KM81 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:31:52.540962+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:31:54.366904+00:00 | Ponto-A-KM67 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:31:54.367400+00:00 | Ponto-B-KM72 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:31:54.367765+00:00 | Ponto-C-KM74 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:31:54.368119+00:00 | Ponto-D-KM81 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:35:31.339960+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:35:35.065513+00:00 | Ponto-A-KM67 | AVISO (Backfill): API não retornou dados históricos (JSON vazio).
+2025-11-02T12:35:36.524823+00:00 | Ponto-A-KM67 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:35:36.525280+00:00 | Ponto-B-KM72 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:35:36.525752+00:00 | Ponto-C-KM74 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:35:36.526171+00:00 | Ponto-D-KM81 | API: ERRO. Não encontrou 'rain_in_mm' nem 'rain_day_mm'. Retornando 0.
+2025-11-02T12:39:00.647503+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:39:02.333389+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva 15min: 0.60mm. Total Dia: 10.80mm
+2025-11-02T12:39:02.333925+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva 15min: 0.80mm. Total Dia: 10.60mm
+2025-11-02T12:39:02.334419+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva 15min: 0.20mm. Total Dia: 2.60mm
+2025-11-02T12:39:02.334894+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva 15min: 0.80mm. Total Dia: 11.60mm
+2025-11-02T12:44:28.587194+00:00 | GERAL | Processo Worker iniciado com sucesso.
+2025-11-02T12:44:32.438734+00:00 | Ponto-A-KM67 | SUCESSO (Backfill): 288 registros históricos de 72h (3x 24h) salvos (CSV e SQLite).
+2025-11-02T12:44:33.921117+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva 15min: 0.40mm. Total Dia: 10.80mm
+2025-11-02T12:44:33.921654+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva 15min: 0.80mm. Total Dia: 10.60mm
+2025-11-02T12:44:33.922056+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva 15min: 0.20mm. Total Dia: 2.60mm
+2025-11-02T12:44:33.922481+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva 15min: 0.80mm. Total Dia: 11.60mm
+2025-11-02T12:59:30.756208+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva 15min: 0.60mm. Total Dia: 11.40mm
+2025-11-02T12:59:30.756882+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva 15min: 0.20mm. Total Dia: 10.80mm
+2025-11-02T12:59:30.757335+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva 15min: 0.20mm. Total Dia: 2.80mm
+2025-11-02T12:59:30.757791+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva 15min: 0.40mm. Total Dia: 12.00mm
+2025-11-02T13:14:30.460542+00:00 | Ponto-A-KM67 | API: Sucesso. Chuva 15min: 0.40mm. Total Dia: 11.80mm
+2025-11-02T13:14:30.461128+00:00 | Ponto-B-KM72 | API: Sucesso. Chuva 15min: 0.60mm. Total Dia: 11.40mm
+2025-11-02T13:14:30.461454+00:00 | Ponto-C-KM74 | API: Sucesso. Chuva 15min: 0.20mm. Total Dia: 3.00mm
+2025-11-02T13:14:30.461734+00:00 | Ponto-D-KM81 | API: Sucesso. Chuva 15min: 0.40mm. Total Dia: 12.40mm

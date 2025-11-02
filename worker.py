@@ -1,4 +1,4 @@
-# worker.py (CORRIGIDO: Chamando a função 'calcular_acumulado_rolling')
+# worker.py (CORRIGIDO v3: Reintroduzindo o Backfill)
 
 import pandas as pd
 import time
@@ -11,10 +11,8 @@ import traceback
 from io import StringIO
 from dotenv import load_dotenv
 
-# Carrega as variáveis do .env file
 load_dotenv()
 
-# Importa as constantes do arquivo de configuração
 from config import PONTOS_DE_ANALISE, RISCO_MAP, FREQUENCIA_API_SEGUNDOS
 
 
@@ -23,11 +21,6 @@ from config import PONTOS_DE_ANALISE, RISCO_MAP, FREQUENCIA_API_SEGUNDOS
 # ==============================================================================
 
 def verificar_alertas(status_novos, status_antigos):
-    """
-    Compara os status novos (calculados no main_loop) com os status antigos
-    lidos do disco/DB, disparando alertas apenas em transições críticas.
-    """
-
     if not status_novos:
         print("[Worker] Nenhum status novo recebido para verificação.")
         return status_antigos
@@ -42,22 +35,14 @@ def verificar_alertas(status_novos, status_antigos):
         status_antigo = status_antigos.get(id_ponto, "INDEFINIDO")
 
         if status_novo != status_antigo:
-            # A lógica real de envio (alertas.enviar_alerta) é chamada aqui
-            # com base nas regras de transição.
-
-            # Exemplo (simplificado):
-            # if status_novo == "PARALIZAÇÃO" and status_antigo == "ALERTA":
-            #    alertas.enviar_alerta(id_ponto, PONTOS_DE_ANALISE[id_ponto]['nome'], status_novo, status_antigo)
-
             status_atualizado[id_ponto] = status_novo
+
+            # (A lógica de envio de alertas.enviar_alerta() vai aqui)
 
     return status_atualizado
 
 
 def main_loop():
-    """
-    O loop principal que roda a cada 15 minutos (900s) e usa o fluxo de arquivo CSV.
-    """
     inicio_ciclo = time.time()
 
     try:
@@ -71,22 +56,21 @@ def main_loop():
 
         print(f"WORKER: Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
-        # --- NOVO: LÓGICA DE BACKFILL (PREENCHIMENTO) PARA O PLANO PRO (KM 67) ---
+        # --- INÍCIO DA ALTERAÇÃO (BACKFILL REATIVADO) ---
         # Verifica se o Ponto A (KM 67) tem dados. Se não tiver, busca o histórico.
         if historico_df.empty or historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67'].empty:
             print("[Worker] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
             try:
-                # Chama a função de backfill (que salva no CSV)
-                data_source.backfill_km67_pro_data()
+                # Chama a função de backfill (que salva no CSV e SQLite)
+                data_source.backfill_km67_pro_data(historico_df)
                 # Recarrega o histórico (agora com dados do KM 67)
                 historico_df, _, _ = data_source.get_all_data_from_disk()
                 print(f"[Worker] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-        # --- FIM DO BACKFILL ---
+        # --- FIM DA ALTERAÇÃO ---
 
-        # 2. COLETAR NOVOS DADOS DA API (ENDPOINT /CURRENT PARA TODOS OS 4 PONTOS)
-        # Esta função faz a coleta, concatena e SALVA o arquivo de histórico.
+        # 2. COLETAR NOVOS DADOS DA API
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
         # 3. RECARREGAR O HISTÓRICO COMPLETO APÓS SALVAMENTO
@@ -97,18 +81,13 @@ def main_loop():
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
         else:
             status_atualizado = {}
-
-            # 4. Iterar por ponto e calcular o acumulado de 72h e Status
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
 
-                # --- INÍCIO DA CORREÇÃO ---
-                # CORRIGIDO: Chamando a nova função com horas=72
+                # Calcula o acumulado de 72h
                 acumulado_72h_df = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
-                # --- FIM DA CORREÇÃO ---
 
                 if not acumulado_72h_df.empty:
-                    # NOTA: O status é definido com base no *último* valor do acumulado de 72h
                     chuva_72h_final = acumulado_72h_df['chuva_mm'].iloc[-1]
                     status_ponto, _ = processamento.definir_status_chuva(chuva_72h_final)
                     status_atualizado[id_ponto] = status_ponto
@@ -118,7 +97,7 @@ def main_loop():
         # 5. Verificar alertas com base no status final
         status_final_com_alertas = verificar_alertas(status_atualizado, status_antigos_do_disco)
 
-        # 6. SALVAR O STATUS ATUALIZADO NO DISCO (status_atual.json)
+        # 6. SALVAR O STATUS ATUALIZADO NO DISCO
         try:
             with open(data_source.STATUS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(status_final_com_alertas, f, indent=2)
@@ -148,9 +127,7 @@ def main_loop():
 
 
 if __name__ == "__main__":
-    # CHAMA A FUNÇÃO DE CONFIGURAÇÃO DE CAMINHO (RESTAURADA)
     data_source.setup_disk_paths()
-
     print("--- Processo Worker Iniciado ---")
     data_source.adicionar_log("GERAL", "Processo Worker iniciado com sucesso.")
 
