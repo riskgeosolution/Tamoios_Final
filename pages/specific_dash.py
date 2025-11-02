@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO: Título do gráfico e eixo Y da Umidade)
+# pages/specific_dash.py (CORRIGIDO v5: Lógica de Fim do Dia no Fuso Horário Local)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -50,10 +50,8 @@ def get_layout():
     return dbc.Container([
         dcc.Store(id='store-id-ponto-ativo'),
 
-        # --- INÍCIO DA ALTERAÇÃO 1 (TÍTULO PRINCIPAL) ---
         # TÍTULO DA ESTAÇÃO (Centralizado)
         html.Div(id='specific-dash-title', className="my-3 text-center"),
-        # --- FIM DA ALTERAÇÃO 1 ---
 
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
 
@@ -80,7 +78,7 @@ def get_layout():
 
                 # --- Card de Data Picker e PDF ---
                 dbc.Card(dbc.CardBody([
-                    html.H6("Gerar PDF (Dados)", className="card-title"),
+                    html.H6("Gerar Relatórios (PDF/Excel)", className="card-title"),  # Título atualizado
                     dcc.DatePickerRange(
                         id='pdf-date-picker',
                         start_date=(pd.Timestamp.now() - pd.Timedelta(days=7)).date(),
@@ -90,19 +88,28 @@ def get_layout():
                     ),
                     html.Br(),
 
-                    # --- INÍCIO DA ALTERAÇÃO (BOTÃO PDF) ---
-                    dcc.Loading(id="loading-pdf", type="default", children=[
-                        html.Div([
-                            dbc.Button("Gerar e Baixar PDF", id='btn-pdf-especifico', color="primary",
-                                       size="sm"),
+                    # --- INÍCIO DA ALTERAÇÃO (BOTÕES PDF E EXCEL LADO A LADO) ---
+                    html.Div([
+                        # Botão PDF
+                        dcc.Loading(id="loading-pdf", type="default", children=[
+                            dbc.Button("Gerar PDF", id='btn-pdf-especifico', color="primary",
+                                       size="sm", className="me-2"),  # me-2 = margin end 2
                             dcc.Download(id='download-pdf-especifico')
-                        ], className="text-center")
-                    ]),
+                        ]),
+
+                        # NOVO Botão Excel
+                        dcc.Loading(id="loading-excel", type="default", children=[
+                            dbc.Button("Gerar Excel", id='btn-excel-especifico', color="success",
+                                       size="sm"),  # success = green
+                            dcc.Download(id='download-excel-especifico')
+                        ])
+                        # d-flex (torna-o flexível) e justify-content-center (centraliza)
+                    ], className="d-flex justify-content-center"),
                     # --- FIM DA ALTERAÇÃO ---
 
-                    # Alerta de erro do PDF
+                    # Alerta de erro (reutilizado para PDF e Excel)
                     dbc.Alert(
-                        "Não há dados neste período para gerar o PDF.",
+                        "Não há dados neste período para gerar o relatório.",
                         id="alert-pdf-error",
                         color="danger",
                         is_open=False,
@@ -112,13 +119,11 @@ def get_layout():
                 ]), className="shadow-sm mb-4"),
 
                 # --- Botão de Logs ---
-                # --- INÍCIO DA ALTERAÇÃO (BOTÃO LOGS) ---
                 dbc.Card(dbc.CardBody([
                     html.H6("Logs de Eventos", className="card-title"),
                     dbc.Button("Ver Histórico de Eventos do Ponto", id='btn-ver-logs', color="secondary",
                                size="sm")
                 ], className="text-center"), className="shadow-sm"),
-                # --- FIM DA ALTERAÇÃO ---
 
             ]),
         ], justify="center", className="mb-5"),
@@ -157,10 +162,8 @@ def update_specific_title(pathname):
         id_ponto = pathname.split('/')[-1]
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto Desconhecido"})
         nome_km = config['nome']
-        # --- ALTERAÇÃO 2: Nome do Ponto ---
         nome_estacao_formatado = f"Estação {nome_km}"
         return html.H3(nome_estacao_formatado, style={'color': '#000000', 'font-weight': 'bold'})
-        # --- FIM DA ALTERAÇÃO 2 ---
     except Exception:
         return html.H3("Detalhes da Estação", style={'color': '#000000', 'font-weight': 'bold'})
 
@@ -180,6 +183,8 @@ def update_specific_title(pathname):
     ]
 )
 def update_specific_dashboard(pathname, dados_json, status_json, selected_hours):
+    # Esta função continua a ler do CSV (store-dados-sessao) para velocidade, como solicitado.
+
     if not dados_json or not status_json or not pathname.startswith('/ponto/') or selected_hours is None:
         return dash.no_update, dash.no_update, dash.no_update
 
@@ -247,15 +252,15 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     else:
         card_class_color = "bg-" + status_geral_cor_bootstrap
 
-    # --- INÍCIO DA ALTERAÇÃO (CÁLCULO DINÂMICO) ---
-
-    # 1. Filtra o DataFrame para o período selecionado (ex: 1h, 24h, 72h)
+    # --- INÍCIO DA CORREÇÃO (FILTRO DE TEMPO) ---
+    # Em vez de usar .tail(), filtramos pelo período de tempo real
     ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
     n_horas_titulo = selected_hours
+    # --- FIM DA CORREÇÃO ---
 
-    # 2. Calcula o acumulado de 72h (FIXO) para o Card
+    # Recalcula o acumulado de 72h (rolling) para o gráfico
     df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
 
     # 3. Calcula o acumulado DINÂMICO para o Gráfico (baseado no selected_hours)
@@ -265,8 +270,6 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     df_chuva_FILTRO_plot = df_chuva_FILTRO_completo[
         df_chuva_FILTRO_completo['timestamp'] >= df_ponto_plot['timestamp'].min()
         ].copy()
-
-    # --- FIM DA ALTERAÇÃO ---
 
     # Pega o último dado para os cards
     try:
@@ -318,9 +321,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
 
         dbc.Col(dbc.Card(
             dbc.CardBody([
-                # --- ALTERAÇÃO 3: Título da Umidade ---
                 html.H5("Umidade do Solo (%)", className="mb-3"),
-                # --- FIM DA ALTERAÇÃO 3 ---
                 dbc.Row([
                     dbc.Col(
                         html.P([
@@ -351,7 +352,6 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
             className="shadow h-100 bg-white"), xs=12, md=4, className="mb-4"),
     ]
 
-    # --- INÍCIO DA CORREÇÃO (SettingWithCopyWarning) ---
     # Corrigindo com .loc
     if 'timestamp' in df_chuva_FILTRO_plot.columns:
         if df_chuva_FILTRO_plot['timestamp'].dt.tz is None:
@@ -360,47 +360,36 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         df_chuva_FILTRO_plot.loc[:, 'timestamp_local'] = df_chuva_FILTRO_plot['timestamp'].dt.tz_convert(
             'America/Sao_Paulo')
     else:
-        # Este else é seguro, pois 'timestamp_local' já existe
         df_chuva_FILTRO_plot.loc[:, 'timestamp_local'] = df_chuva_FILTRO_plot['timestamp']
-    # --- FIM DA CORREÇÃO ---
 
     # Gráfico de Chuva
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # --- USANDO TIMESTAMP LOCAL PARA O EIXO X ---
     fig_chuva.add_trace(
         go.Bar(x=df_ponto_plot['timestamp_local'], y=df_ponto_plot['chuva_mm'], name='Pluviometria Horária (mm)',
                marker_color='#2C3E50', opacity=0.8), secondary_y=False)
 
-    # --- INÍCIO DA ALTERAÇÃO (GRÁFICO DINÂMICO) ---
     fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'],
                                    name=f'Acumulada ({n_horas_titulo}h)',  # Nome dinâmico
                                    mode='lines', line=dict(color='#007BFF', width=2.5)), secondary_y=True)
 
     fig_chuva.update_layout(
-        # --- ALTERAÇÃO 1: TÍTULO DO GRÁFICO ---
         title_text=f"Pluviometria - Estação {config['nome']} ({n_horas_titulo}h)",
-        # --- FIM DA ALTERAÇÃO 1 ---
         template=TEMPLATE_GRAFICO_MODERNO,
-        # Aumentada a margem inferior (b=80)
         margin=dict(l=40, r=20, t=50, b=80),
-        # Ajustada a posição Y da legenda para -0.5 (mais para baixo)
         legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
         xaxis_title="Data e Hora", yaxis_title="Pluviometria Horária (mm)",
-        yaxis2_title=f"Acumulada ({n_horas_titulo}h)",  # Título do eixo dinâmico
+        yaxis2_title=f"Acumulada ({n_horas_titulo}h)",
         hovermode="x unified", bargap=0.1)
-    # --- FIM DA ALTERAÇÃO ---
 
-    # --- EIXO X (3 EM 3 HORAS, DIAGONAL) ---
     fig_chuva.update_xaxes(
-        dtick=3 * 60 * 60 * 1000,  # 3 horas em milissegundos
-        tickformat="%d/%m %Hh",  # Formato Dia/Mês Hora (ex: 31/10 14h)
-        tickangle=-45  # Rotaciona os labels
+        dtick=3 * 60 * 60 * 1000,
+        tickformat="%d/%m %Hh",
+        tickangle=-45
     )
-    # --- FIM DA ALTERAÇÃO ---
 
     fig_chuva.update_yaxes(title_text="Pluviometria Horária (mm)", secondary_y=False);
-    fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)  # Título do eixo dinâmico
+    fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)
 
     # Gráfico de Umidade
     df_umidade = df_ponto_plot.melt(id_vars=['timestamp_local'],
@@ -414,32 +403,21 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     })
 
     fig_umidade = px.line(df_umidade, x='timestamp_local', y='Umidade (%)', color='Sensor',
-                          # --- ALTERAÇÃO 2: TÍTULO DO GRÁFICO ---
                           title=f"Variação da Umidade do Solo - Estação {config['nome']} ({n_horas_titulo}h)",
-                          # --- FIM DA ALTERAÇÃO 2 ---
                           color_discrete_map=CORES_UMIDADE)
     fig_umidade.update_traces(line=dict(width=3));
 
-    # --- INÍCIO DA ALTERAÇÃO (LEGENDA, MARGEM E TÍTULO DO EIXO) ---
     fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO,
-                              # Aumentada a margem inferior (b=80)
                               margin=dict(l=40, r=20, t=40, b=80),
-                              # Ajustada a posição Y da legenda
                               legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-                              # Adicionado título do eixo X
                               xaxis_title="Data e Hora",
-                              # --- ALTERAÇÃO 4: TÍTULO DO EIXO Y ---
                               yaxis_title="Umidade do Solo (%)")
-    # --- FIM DA ALTERAÇÃO 4 ---
-    # --- FIM DA ALTERAÇÃO ---
 
-    # --- EIXO X (3 EM 3 HORAS, DIAGONAL) ---
     fig_umidade.update_xaxes(
-        dtick=3 * 60 * 60 * 1000,  # 3 horas em milissegundos
-        tickformat="%d/%m %Hh",  # Formato Dia/Mês Hora (ex: 31/10 14h)
-        tickangle=-45  # Rotaciona os labels
+        dtick=3 * 60 * 60 * 1000,
+        tickformat="%d/%m %Hh",
+        tickangle=-45
     )
-    # --- FIM DA ALTERAÇÃO ---
 
     # Layout Lado a Lado
     layout_graficos = [
@@ -486,7 +464,6 @@ def load_logs_content(is_open, id_ponto, logs_json):
         return dash.no_update if not is_open else "Nenhum evento registrado."
 
     try:
-        # logs_json é a STRING BRUTA do eventos.log. Apenas dividimos por linha.
         if isinstance(logs_json, str):
             logs_list = logs_json.split('\n')
         elif isinstance(logs_json, list):
@@ -499,13 +476,11 @@ def load_logs_content(is_open, id_ponto, logs_json):
         if not logs_list:
             return "Nenhum evento registrado."
 
-        # Filtra logs para este ponto específico ou logs 'GERAL'
         logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
 
         if not logs_filtrados:
             return f"Nenhum evento específico registrado para o ponto {id_ponto}."
 
-        # Formata os logs para exibição
         logs_formatados = []
         for log_str in reversed(logs_filtrados):  # Mostra os mais recentes primeiro
             parts = log_str.split('|')
@@ -538,74 +513,71 @@ def load_logs_content(is_open, id_ponto, logs_json):
         return f"Erro ao formatar logs: {e}"
 
 
-# --- INÍCIO DA ALTERAÇÃO (PDF COM GRÁFICOS) ---
-
-# Callback para Gerar e Baixar PDF dos Dados Históricos
+# --- INÍCIO DA ALTERAÇÃO v5 (Fuso Horário Local no Fim do Dia) ---
 @app.callback(
     [Output('download-pdf-especifico', 'data'),
-     Output('alert-pdf-error', 'is_open')],
+     Output('alert-pdf-error', 'is_open', allow_duplicate=True)],
     Input('btn-pdf-especifico', 'n_clicks'),
     [
         State('pdf-date-picker', 'start_date'),
         State('pdf-date-picker', 'end_date'),
         State('store-id-ponto-ativo', 'data'),
-        State('store-dados-sessao', 'data'),
-        State('store-ultimo-status', 'data')  # <-- Adicionado State para Status
+        State('store-ultimo-status', 'data')
     ],
     prevent_initial_call=True
 )
-def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, dados_json, status_json):
-    if n_clicks is None or not id_ponto or not dados_json:
+def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
+    if n_clicks is None or not id_ponto:
         return dash.no_update, False
 
     try:
-        # 1. Preparar dados
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
-        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
-
-        # Conversão de datas para filtro
+        # 1. Preparar datas
         start_dt = pd.to_datetime(start_date).tz_localize('UTC')
-        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        end_dt = end_dt.tz_localize('UTC')
 
-        # Filtrar o DataFrame
-        df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
+        # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
+        # 1. Pega a data final (ex: '2025-11-01')
+        end_dt_naive = pd.to_datetime(end_date)
+        # 2. Localiza ela no fuso de SP (ex: '2025-11-01 00:00:00-03:00')
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
+        # 3. Adiciona 1 dia e subtrai 1 segundo (ex: '2025-11-01 23:59:59-03:00')
+        end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        # 4. Converte para UTC para a query (ex: '2025-11-02 02:59:59+00:00')
+        end_dt = end_dt_local_final.tz_convert('UTC')
+        # --- FIM DA CORREÇÃO ---
 
-        if df_ponto['timestamp'].dt.tz is None:
-            df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_localize('UTC')
-        else:
-            df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_convert('UTC')
+        # 2. Ler dados DIRETAMENTE DO SQLITE
+        df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
 
-        df_filtrado = df_ponto[
-            (df_ponto['timestamp'] >= start_dt) &
-            (df_ponto['timestamp'] <= end_dt)
-            ].copy()
+        # 2b. Limpar dados nulos
+        df_filtrado = df_filtrado.dropna(subset=['timestamp'])
 
         if df_filtrado.empty:
-            print("LOG PDF: Sem dados no período selecionado.")
+            print("LOG PDF: Sem dados no período selecionado (SQLite).")
             return dash.no_update, True
 
-        # 2. Configurações e Status
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
+        # --- CORREÇÃO (Fuso Horário Robusto para PDF) ---
+        if df_filtrado['timestamp'].dt.tz is None:
+            print("LOG PDF: Detectados timestamps 'naive'. Assumindo UTC.")
+            try:
+                df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize('UTC')
+            except Exception as e_tz:
+                print(f"LOG PDF: Falha ao localizar timestamps 'naive' (pode ser misto): {e_tz}")
+                df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC',
+                                                                                                   ambiguous='infer',
+                                                                                                   nonexistent='shift_forward')
 
-        # Pega o Status Atual para o PDF
+        df_filtrado.loc[:, 'timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        # --- FIM DA CORREÇÃO ---
+
+        # 3. Configurações e Status
+        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         status_atual_dict = status_json
         status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
         risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
-        # --- INÍCIO DA GERAÇÃO DE GRÁFICOS PARA PDF ---
-
-        # 3. Adicionar timestamp_local ao df_filtrado (necessário para os eixos X)
-        # --- INÍCIO DA CORREÇÃO (SettingWithCopyWarning) ---
-        df_filtrado.loc[:, 'timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
-        # --- FIM DA CORREÇÃO ---
-
-        # 4. Calcular Acumulado (usando o df_filtrado)
-        # --- ALTERAÇÃO: Usar 72h fixo para o PDF ---
+        # 5. Calcular Acumulado
         df_chuva_72h_pdf = processamento.calcular_acumulado_rolling(df_filtrado, horas=72)
-
-        # --- INÍCIO DA CORREÇÃO (SettingWithCopyWarning) ---
         if 'timestamp' in df_chuva_72h_pdf.columns:
             if df_chuva_72h_pdf['timestamp'].dt.tz is None:
                 df_chuva_72h_pdf.loc[:, 'timestamp'] = df_chuva_72h_pdf['timestamp'].dt.tz_localize('UTC')
@@ -613,59 +585,46 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, dados_json, stat
                 'America/Sao_Paulo')
         else:
             df_chuva_72h_pdf = df_chuva_72h_pdf.copy()
-            df_chuva_72h_pdf.loc[:, 'timestamp_local'] = df_chuva_72h_pdf['timestamp']  # fallback
-        # --- FIM DA CORREÇÃO ---
+            df_chuva_72h_pdf.loc[:, 'timestamp_local'] = df_chuva_72h_pdf['timestamp']
 
-        # 5. Gerar Gráfico de Chuva
+        # 6. Gerar Gráfico de Chuva
         fig_chuva_pdf = make_subplots(specs=[[{"secondary_y": True}]])
         fig_chuva_pdf.add_trace(
             go.Bar(x=df_filtrado['timestamp_local'], y=df_filtrado['chuva_mm'], name='Pluv. Horária (mm)',
                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
         fig_chuva_pdf.add_trace(go.Scatter(x=df_chuva_72h_pdf['timestamp_local'], y=df_chuva_72h_pdf['chuva_mm'],
-                                           name='Acumulada (72h)', mode='lines',  # Nome fixo para PDF
+                                           name='Acumulada (72h)', mode='lines',
                                            line=dict(color='#007BFF', width=2.5)), secondary_y=True)
-
         titulo_chuva = f"Pluviometria - Estação {config['nome']}"
         fig_chuva_pdf.update_layout(
-            title_text=titulo_chuva,
-            template=TEMPLATE_GRAFICO_MODERNO,
+            title_text=titulo_chuva, template=TEMPLATE_GRAFICO_MODERNO,
             margin=dict(l=40, r=20, t=50, b=80),
             legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5)
         )
 
-        # 6. Gerar Gráfico de Umidade
+        # 7. Gerar Gráfico de Umidade
         df_umidade_pdf = df_filtrado.melt(id_vars=['timestamp_local'],
                                           value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                           var_name='Sensor', value_name='Umidade (%)')
         df_umidade_pdf['Sensor'] = df_umidade_pdf['Sensor'].replace({
             'umidade_1m_perc': '1m', 'umidade_2m_perc': '2m', 'umidade_3m_perc': '3m'
         })
-
         fig_umidade_pdf = px.line(df_umidade_pdf, x='timestamp_local', y='Umidade (%)', color='Sensor',
                                   title=f"Variação da Umidade do Solo - Estação {config['nome']}",
                                   color_discrete_map=CORES_UMIDADE)
         fig_umidade_pdf.update_layout(
-            template=TEMPLATE_GRAFICO_MODERNO,
-            margin=dict(l=40, r=20, t=40, b=80),
+            template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=80),
             legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
         )
 
-        # --- FIM DA GERAÇÃO DE GRÁFICOS PARA PDF ---
-
-        # 7. Chamar a função de gerar PDF (passando os gráficos)
+        # 8. Chamar a função de gerar PDF
         pdf_buffer = gerador_pdf.criar_relatorio_em_memoria(
-            df_filtrado,
-            fig_chuva_pdf,
-            fig_umidade_pdf,
-            status_texto,
-            status_cor
+            df_filtrado, fig_chuva_pdf, fig_umidade_pdf, status_texto, status_cor
         )
-
         nome_arquivo = f"Relatorio_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        print(f"LOG PDF: PDF gerado com sucesso (COM GRÁFICOS, via SQLite). Arquivo: {nome_arquivo}")
 
-        print(f"LOG PDF: PDF gerado com sucesso (COM GRÁFICOS). Arquivo: {nome_arquivo}")
-
-        # 8. Download
+        # 9. Download
         pdf_output = io.BytesIO(pdf_buffer)
         return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf"), False
 
@@ -675,46 +634,123 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, dados_json, stat
         return dash.no_update, True
 
 
-# --- FIM DA ALTERAÇÃO (PDF COM GRÁFICOS) ---
+# --- FIM DA ALTERAÇÃO ---
 
 
-# --- INÍCIO DA ALTERAÇÃO (Callback PDF de Logs) ---
+# --- INÍCIO DA ALTERAÇÃO v5 (Fuso Horário Local no Fim do Dia) ---
 @app.callback(
-    Output('download-pdf-logs', 'data'),
-    Input('btn-pdf-logs', 'n_clicks'),
+    [Output('download-excel-especifico', 'data'),
+     Output('alert-pdf-error', 'is_open', allow_duplicate=True)],  # Reutiliza o alerta de erro
+    Input('btn-excel-especifico', 'n_clicks'),
     [
-        State('store-logs-sessao', 'data'),  # <-- CORRIGIDO: Ler do store de dados brutos
+        State('pdf-date-picker', 'start_date'),
+        State('pdf-date-picker', 'end_date'),
         State('store-id-ponto-ativo', 'data')
     ],
     prevent_initial_call=True
 )
-def generate_logs_pdf(n_clicks, logs_json, id_ponto):  # <-- Variável renomeada
+def generate_data_excel(n_clicks, start_date, end_date, id_ponto):
+    if n_clicks is None or not id_ponto:
+        return dash.no_update, False
+
+    try:
+        # 1. Preparar datas
+        start_dt = pd.to_datetime(start_date).tz_localize('UTC')
+
+        # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
+        # 1. Pega a data final (ex: '2025-11-01')
+        end_dt_naive = pd.to_datetime(end_date)
+        # 2. Localiza ela no fuso de SP (ex: '2025-11-01 00:00:00-03:00')
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
+        # 3. Adiciona 1 dia e subtrai 1 segundo (ex: '2025-11-01 23:59:59-03:00')
+        end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        # 4. Converte para UTC para a query (ex: '2025-11-02 02:59:59+00:00')
+        end_dt = end_dt_local_final.tz_convert('UTC')
+        # --- FIM DA CORREÇÃO ---
+
+        # 2. Ler dados DIRETAMENTE DO SQLITE
+        df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
+
+        if df_filtrado.empty:
+            print("LOG EXCEL: Sem dados no período selecionado (SQLite).")
+            return dash.no_update, True  # Abre o alerta de erro
+
+        # 3. Limpar dados nulos
+        df_filtrado = df_filtrado.dropna(subset=['timestamp'])
+        if df_filtrado.empty:
+            print("LOG EXCEL: Dados lidos, mas todos tinham timestamp nulo. Nenhum dado para exportar.")
+            return dash.no_update, True
+
+        # 4. Lógica de Fuso Horário (para Excel)
+        if df_filtrado['timestamp'].dt.tz is None:
+            print("LOG EXCEL: Detectados timestamps 'naive'. Assumindo UTC.")
+            try:
+                df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize('UTC')
+            except Exception as e_tz:
+                print(f"LOG EXCEL: Falha ao localizar timestamps 'naive' (pode ser misto): {e_tz}")
+                df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC',
+                                                                                                   ambiguous='infer',
+                                                                                                   nonexistent='shift_forward')
+
+        df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize(None)
+
+        # 5. Preparar o ficheiro Excel em memória
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_filtrado.to_excel(writer, index=False, sheet_name='Dados Monitoramento')
+        excel_data = output.getvalue()
+
+        # 6. Configurações de Nome e Download
+        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
+        nome_arquivo = f"Relatorio_Excel_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        print(f"LOG EXCEL: Excel gerado com sucesso (do SQLite). Arquivo: {nome_arquivo}")
+
+        # 7. Enviar o ficheiro
+        return dcc.send_bytes(excel_data, nome_arquivo), False
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO no Callback Excel:")
+        traceback.print_exc()
+        return dash.no_update, True
+
+
+# --- FIM DA ALTERAÇÃO ---
+
+
+# Callback para Gerar e Baixar PDF dos Logs de Eventos
+@app.callback(
+    Output('download-pdf-logs', 'data'),
+    Input('btn-pdf-logs', 'n_clicks'),
+    [
+        State('store-logs-sessao', 'data'),
+        State('store-id-ponto-ativo', 'data')
+    ],
+    prevent_initial_call=True
+)
+def generate_logs_pdf(n_clicks, logs_json, id_ponto):
     if n_clicks is None or not id_ponto or not logs_json:
         return dash.no_update
 
     try:
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
 
-        # Converte o conteúdo do store (logs_json) para uma lista de strings
         if isinstance(logs_json, str):
             logs_list = logs_json.split('\n')
+        elif isinstance(logs_json, list):
+            logs_list = logs_json
         else:
-            logs_list = json.loads(logs_json)  # Fallback
+            logs_list = json.loads(logs_json)
 
         logs_list = [log.strip() for log in logs_list if log.strip()]
-
-        # Filtra logs (mesma lógica do modal)
         logs_to_pdf = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
 
         if not logs_to_pdf:
-            return dash.no_update  # Não gera PDF vazio
+            return dash.no_update
 
-        # Usamos a função de gerar logs do gerador_pdf
         pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(id_ponto, logs_to_pdf)
-
         nome_arquivo = f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-        # CORREÇÃO DE DOWNLOAD: ENVELOPAR O BUFFER BINÁRIO EM io.BytesIO
         pdf_output = io.BytesIO(pdf_buffer)
         return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf")
 

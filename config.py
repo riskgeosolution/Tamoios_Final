@@ -1,4 +1,4 @@
-# config.py (CORRIGIDO: Limites de chuva atualizados)
+# config.py (CORRIGIDO: Limites de chuva atualizados e pronto para SQLite)
 
 import os
 import datetime
@@ -44,18 +44,20 @@ WEATHERLINK_CONFIG = {
 # --- FIM DA CONFIGURAÇÃO MULTI-ESTAÇÃO ---
 
 # --- CONFIGURAÇÕES DO BANCO DE DADOS ---
-# Usa DATABASE_URL do ambiente (Render/Postgres) ou SQLite local para desenvolvimento.
+# Usa DATABASE_URL do ambiente (Render/Postgres) ou o ficheiro SQLite local
+# O seu ficheiro local chama-se 'temp_local_db.db'
 DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
+DB_TABLE_NAME = "historico_monitoramento" # Nome da tabela para guardar os dados
 # --- FIM DA CONFIGURAÇÃO DB ---
 
 
 # --- Configurações do Worker ---
 FREQUENCIA_API_SEGUNDOS = 60 * 15
-MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS # Manter 72h de dados
+# Esta constante continua a ser usada para o truncamento do CSV
+MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS # Manter 72h de dados (no CSV)
 
 
 # --- Configurações dos Pontos de Análise ---
-# CONSTANTES_PADRAO PRECISA SER DEFINIDA AQUI NO TOPO!
 CONSTANTES_PADRAO = {
     "UMIDADE_BASE_1M": 30.0, "UMIDADE_BASE_2M": 36.0, "UMIDADE_BASE_3M": 39.0,
     "UMIDADE_SATURACAO_1M": 47.0,

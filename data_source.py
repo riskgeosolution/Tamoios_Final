@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO: Arredondando timestamps para 15 minutos)
+# data_source.py (CORRIGIDO: Conversão de tipo ANTES de salvar no SQLite)
 
 import pandas as pd
 import json
@@ -11,8 +11,9 @@ import hmac
 from io import StringIO
 import warnings
 import time
+from sqlalchemy import create_engine, inspect, text  # <-- 'text' é necessário para queries parametrizadas
 
-# Suprime FutureWarnings (como o de concatenação)
+# Suprime FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # Importa as constantes do config.py
@@ -21,7 +22,8 @@ from config import (
     FREQUENCIA_API_SEGUNDOS,
     MAX_HISTORICO_PONTOS,
     WEATHERLINK_CONFIG,
-    DB_CONNECTION_STRING
+    DB_CONNECTION_STRING,
+    DB_TABLE_NAME
 )
 
 # --- Configurações de Disco (Caminhos) ---
@@ -61,11 +63,13 @@ def setup_disk_paths():
     Esta função é chamada pelo index.py e worker.py na inicialização.
     """
     print("--- data_source.py ---")
-    global DATA_DIR, STATUS_FILE, LOG_FILE, HISTORICO_FILE_CSV
+    global DATA_DIR, STATUS_FILE, LOG_FILE, HISTORICO_FILE_CSV, DB_CONNECTION_STRING
 
     # Define caminhos baseados no ambiente (Render ou Local)
     if os.environ.get('RENDER'):
         DATA_DIR = "/var/data"
+        # --- NOVO: Força o caminho do DB para o Persistent Disk ---
+        DB_CONNECTION_STRING = f'sqlite:///{DATA_DIR}/temp_local_db.db'
     else:
         DATA_DIR = "."  # Garante que está no diretório local
 
@@ -77,11 +81,114 @@ def setup_disk_paths():
     print(f"Caminho do Disco de Dados: {DATA_DIR}")
     print(f"Arquivo de Status: {STATUS_FILE}")
     print(f"Arquivo de Log: {LOG_FILE}")
-    print(f"Fonte de Histórico: ARQUIVO LOCAL ({HISTORICO_FILE_CSV})")
+    print(f"Fonte de Histórico (Leitura): ARQUIVO LOCAL ({HISTORICO_FILE_CSV})")
+    print(f"Banco de Dados (Escrita): {DB_CONNECTION_STRING}")
 
 
 # ==========================================================
-# --- FUNÇÕES DE LEITURA E ESCRITA CSV ---
+# --- FUNÇÕES DE BANCO DE DADOS (SQLITE) ---
+# ==========================================================
+
+def get_engine():
+    """ Cria e retorna o engine do SQLAlchemy. """
+    return create_engine(DB_CONNECTION_STRING)
+
+
+def save_to_sqlite(df_novos_dados):
+    """ Salva apenas os novos dados no banco de dados SQLite (sem truncar). """
+    if df_novos_dados.empty:
+        return
+    try:
+        engine = get_engine()
+        # Salva os novos dados (sempre anexando)
+        df_novos_dados.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
+        print(f"[SQLite] {len(df_novos_dados)} novos pontos salvos no DB.")
+    except Exception as e:
+        adicionar_log("GERAL", f"ERRO CRÍTICO ao salvar no SQLite: {e}")
+        print(f"ERRO CRÍTICO ao salvar no SQLite: {e}")
+
+
+def migrate_csv_to_sqlite_initial():
+    """
+    Função de migração: transfere todos os dados do CSV para o SQLite,
+    mas só executa se a tabela do SQLite estiver vazia.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+
+    # 1. Verifica se a tabela SQLite já tem dados
+    try:
+        if inspector.has_table(DB_TABLE_NAME):
+            with engine.connect() as connection:
+                query = text(f"SELECT COUNT(1) FROM {DB_TABLE_NAME}")  # Usa text()
+                result = connection.execute(query)
+                count = result.scalar()
+
+                if count > 0:
+                    print(f"[MIGRAÇÃO] Tabela SQLite '{DB_TABLE_NAME}' já contém {count} linhas. Migração ignorada.")
+                    return True  # Já migrado
+    except Exception as e:
+        print(f"[MIGRAÇÃO] Erro ao verificar tabela SQLite ({e}). Tentando migrar...")
+
+    # 2. Se a tabela está vazia (ou não existe), carrega o CSV completo
+    df_csv = read_historico_from_csv()
+
+    if df_csv.empty:
+        print("[MIGRAÇÃO] CSV histórico vazio. Migração concluída (sem dados).")
+        return True
+
+    # 3. Salva os dados do CSV no SQLite
+    try:
+        # Usa 'replace' para garantir que a tabela seja criada corretamente ou limpa
+        # e preenchida com os dados do CSV
+        df_csv.to_sql(DB_TABLE_NAME, engine, if_exists='replace', index=False)
+        print(f"[MIGRAÇÃO] SUCESSO! {len(df_csv)} linhas transferidas do CSV para o SQLite.")
+        return True
+    except Exception as e:
+        adicionar_log("GERAL", f"ERRO CRÍTICO na migração CSV->SQLite: {e}")
+        print(f"ERRO CRÍTICO na migração CSV->SQLite: {e}")
+        return False
+
+
+# --- INÍCIO DA NOVA FUNÇÃO (LEITURA DO SQLITE) ---
+def read_data_from_sqlite(id_ponto, start_dt, end_dt):
+    """
+    Lê dados do banco de dados SQLite para um ponto específico e um intervalo de datas.
+    """
+    print(f"[SQLite] Consultando dados para {id_ponto} de {start_dt} a {end_dt}")
+    engine = get_engine()
+
+    # Converte datetimes para strings ISO compatíveis com SQLite (UTC)
+    start_str = start_dt.isoformat()
+    end_str = end_dt.isoformat()
+
+    query = f"""
+        SELECT * FROM {DB_TABLE_NAME}
+        WHERE id_ponto = :ponto
+        AND timestamp >= :start
+        AND timestamp <= :end
+        ORDER BY timestamp ASC
+    """
+
+    try:
+        df = pd.read_sql_query(
+            query,
+            engine,
+            params={"ponto": id_ponto, "start": start_str, "end": end_str},
+            parse_dates=["timestamp"]  # Converte a coluna de volta para datetime
+        )
+        return df
+    except Exception as e:
+        print(f"ERRO CRÍTICO ao ler do SQLite: {e}")
+        adicionar_log("GERAL", f"ERRO CRÍTICO ao ler do SQLite: {e}")
+        return pd.DataFrame()
+
+
+# --- FIM DA NOVA FUNÇÃO ---
+
+
+# ==========================================================
+# --- FUNÇÕES DE LEITURA E ESCRITA CSV (PARA TESTES) ---
 # ==========================================================
 
 def read_historico_from_csv():
@@ -90,7 +197,7 @@ def read_historico_from_csv():
         historico_df = pd.read_csv(HISTORICO_FILE_CSV, sep=',')
 
         if 'timestamp' in historico_df.columns:
-            historico_df['timestamp'] = pd.to_datetime(historico_df['timestamp'])
+            historico_df['timestamp'] = pd.to_datetime(historico_df['timestamp'], utc=True)
 
         # Garante que apenas colunas conhecidas sejam lidas
         colunas_validas = [col for col in COLUNAS_HISTORICO if col in historico_df.columns]
@@ -110,10 +217,15 @@ def read_historico_from_csv():
 
 
 def save_historico_to_csv(df):
-    """ Salva o DataFrame completo no arquivo CSV. """
+    """ Salva o DataFrame completo no arquivo CSV (truncado em 72h). """
     try:
-        df.to_csv(HISTORICO_FILE_CSV, index=False)
-        print(f"[CSV] Histórico salvo no arquivo.")
+        # Aplica o truncamento de 72h (MAX_HISTORICO_PONTOS)
+        max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
+        df_truncado = df.sort_values(by='timestamp').drop_duplicates(
+            subset=['id_ponto', 'timestamp'], keep='last').tail(max_pontos)
+
+        df_truncado.to_csv(HISTORICO_FILE_CSV, index=False)
+        print(f"[CSV] Histórico salvo no arquivo (Mantidas {len(df_truncado)} entradas).")
     except Exception as e:
         adicionar_log("CSV_SAVE", f"ERRO ao salvar histórico: {e}")
         print(f"ERRO ao salvar CSV: {e}")
@@ -126,9 +238,9 @@ def save_historico_to_csv(df):
 
 def get_all_data_from_disk():
     """
-    Lê o histórico do arquivo CSV (fonte principal) e status/logs dos arquivos.
+    Lê o histórico do arquivo CSV (para testes) e status/logs dos arquivos.
     """
-    # 1. Ler Histórico do CSV
+    # 1. Ler Histórico do CSV (Como solicitado, mantemos a leitura do CSV)
     historico_df = read_historico_from_csv()
 
     # 2. Ler Status (status_atual.json)
@@ -157,16 +269,17 @@ def get_all_data_from_disk():
 # --- FUNÇÕES USADAS PELO WORKER.PY ---
 # ==========================================================
 
-def executar_passo_api_e_salvar(historico_df):
+def executar_passo_api_e_salvar(historico_df_csv):
     """
     Função principal chamada pelo worker.py.
     1. Chama a API
-    2. Salva NOVO DADO no histórico CSV
+    2. Salva NOVO DADO no histórico CSV (truncado)
+    3. Salva NOVO DADO no histórico SQLite (completo)
     """
 
     try:
         # PONTO CRÍTICO: CHAMA A FUNÇÃO DE COLETA DA API (/current)
-        dados_api, status_novos, logs_api = fetch_data_from_weatherlink_api()
+        dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api()
 
         for log in logs_api:
             adicionar_log(log['id_ponto'], log['mensagem'])
@@ -175,33 +288,36 @@ def executar_passo_api_e_salvar(historico_df):
         adicionar_log("GERAL", f"ERRO CRÍTICO (fetch_data): {e}")
         return pd.DataFrame(), None
 
-    if not dados_api:
+    if dados_api_df.empty:
         print("[Worker] API não retornou novos dados neste ciclo.")
         return pd.DataFrame(), status_novos
 
     try:
-        novos_df = pd.DataFrame(dados_api)
-
+        # Garante que as colunas estão corretas
         for col in COLUNAS_HISTORICO:
-            if col not in novos_df:
-                novos_df[col] = pd.NA
-        novos_df = novos_df[COLUNAS_HISTORICO]
+            if col not in dados_api_df:
+                dados_api_df[col] = pd.NA
+        dados_api_df = dados_api_df[COLUNAS_HISTORICO]
 
-        # 1. CONCATENAR E SALVAR (Fluxo de arquivo CSV)
-        historico_atualizado_df = pd.concat([historico_df, novos_df], ignore_index=True)
-        historico_atualizado_df['timestamp'] = pd.to_datetime(historico_atualizado_df['timestamp'])
-
-        max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
-
-        # --- CORREÇÃO DE DUPLICATAS ---
-        # Garante que os timestamps arredondados sejam únicos, mantendo o último registro
-        historico_atualizado_df = historico_atualizado_df.sort_values(by='timestamp').drop_duplicates(
-            subset=['id_ponto', 'timestamp'], keep='last').tail(max_pontos)
+        # --- INÍCIO DA CORREÇÃO ---
+        # Converte o timestamp (que é string) para datetime ANTES de salvar.
+        # Isso garante que o SQLite receba o tipo de dado correto.
+        if 'timestamp' in dados_api_df.columns:
+            dados_api_df['timestamp'] = pd.to_datetime(dados_api_df['timestamp'], utc=True)
         # --- FIM DA CORREÇÃO ---
 
-        save_historico_to_csv(historico_atualizado_df)
+        # 1. SALVAMENTO DUPLO (SQLITE): Salva os novos dados no DB (sem truncar)
+        save_to_sqlite(dados_api_df)
 
-        return novos_df, status_novos
+        # 2. SALVAMENTO DUPLO (CSV): Concatena e salva no CSV (com truncamento)
+        historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
+        # A conversão de timestamp já foi feita antes do save_to_sqlite,
+        # mas garantimos aqui para a concatenação.
+        historico_atualizado_df_csv['timestamp'] = pd.to_datetime(historico_atualizado_df_csv['timestamp'], utc=True)
+
+        save_historico_to_csv(historico_atualizado_df_csv)
+
+        return dados_api_df, status_novos
 
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO (processar/salvar): {e}")
@@ -264,16 +380,12 @@ def calculate_hmac_signature_historic(api_key, api_secret, t, station_id, start_
     return hmac_digest
 
 
-# --- INÍCIO DA CORREÇÃO (ARREDONDAMENTO DE TIMESTAMP) ---
 def arredondar_timestamp_15min(ts_epoch):
     """ Arredonda um timestamp (em segundos) para baixo, para o intervalo de 15 minutos mais próximo. """
     dt_obj = datetime.datetime.fromtimestamp(ts_epoch, datetime.timezone.utc)
     # Zera segundos e microssegundos, e arredonda os minutos
     dt_obj = dt_obj.replace(second=0, microsecond=0, minute=(dt_obj.minute // 15) * 15)
     return dt_obj.isoformat()
-
-
-# --- FIM DA CORREÇÃO ---
 
 
 def fetch_data_from_weatherlink_api():
@@ -284,22 +396,19 @@ def fetch_data_from_weatherlink_api():
 
     logs_api = []
     dados_processados = []
-    status_calculados = {}
+    status_calculados = {}  # Esta função não calcula mais o status, o worker fará isso.
 
     try:
         from processamento import definir_status_chuva
     except ImportError:
         print("ERRO: Não foi possível importar definir_status_chuva. Verifique processamento.py")
-        return [], {}, []
+        return pd.DataFrame(), {}, []
 
     t = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
-    # --- INÍCIO DA CORREÇÃO (ARREDONDAMENTO DE TIMESTAMP) ---
-    # Arredonda o timestamp atual ANTES de salvar
     timestamp_arredondado = arredondar_timestamp_15min(t)
-    # --- FIM DA CORREÇÃO ---
 
-    print("[API] COLETANDO DADOS DE CHUVA (INCREMENTAL /current) DA WEATHERLINK")
+    print("[API] COLETANDO DADOS (INCREMENTAL /current) DA WEATHERLINK")
 
     with httpx.Client(timeout=30.0) as client:
         for id_ponto, config_ponto in PONTOS_DE_ANALISE.items():
@@ -310,6 +419,9 @@ def fetch_data_from_weatherlink_api():
             api_secret = station_config['API_SECRET']
 
             chuva_incremental = pd.NA
+            umidade_1m = pd.NA
+            umidade_2m = pd.NA
+            umidade_3m = pd.NA
 
             # 1. VERIFICAÇÃO DE CREDENCIAIS / FALLBACK
             if "SUA_CHAVE_API" in api_key or "SEU_SEGREDO_API" in api_secret:
@@ -321,15 +433,8 @@ def fetch_data_from_weatherlink_api():
 
             else:
                 # 2. GERAÇÃO DE ASSINATURA E CHAMADA DA API REAL
-
                 signature = calculate_hmac_signature_current(api_key, api_secret, t, station_id)
-
-                params_requisicao = {
-                    "api-key": api_key,
-                    "t": str(t),
-                    "api-signature": signature
-                }
-
+                params_requisicao = {"api-key": api_key, "t": str(t), "api-signature": signature}
                 url = WEATHERLINK_API_ENDPOINT.format(station_id=station_id)
 
                 print(f"[API {id_ponto}] URL BASE: {url}. Params: {signature[:10]}...")
@@ -340,21 +445,15 @@ def fetch_data_from_weatherlink_api():
                     response.raise_for_status()
                     data = response.json()
 
-                    # Esta verificação 'code: 0' ESTÁ CORRETA para o /current
-                    if data.get('code') != 0:
-                        raise Exception(f"API retornou erro: {data.get('message', 'Erro desconhecido')}")
-
-                    # 3. EXTRAÇÃO DOS DADOS DE CHUVA INCREMENTAL
+                    # 3. EXTRAÇÃO DOS DADOS
                     if data.get('sensors') and data['sensors'][0].get('data'):
                         current_data = data['sensors'][0]['data'][0]
 
+                        # Procura por chuva
                         chuva_incremental = current_data.get('rain_in_mm')
                         if chuva_incremental is None:
                             chuva_incremental = current_data.get('rainfall_mm', 0.0)
-
                         if chuva_incremental is None:
-                            logs_api.append({"id_ponto": id_ponto,
-                                             "mensagem": "API: Métrica de chuva incremental (rain_in_mm) não encontrada. Usando 0.0"})
                             chuva_incremental = 0.0
 
                         logs_api.append({"id_ponto": id_ponto,
@@ -371,23 +470,22 @@ def fetch_data_from_weatherlink_api():
                     logs_api.append({"id_ponto": id_ponto, "mensagem": f"ERRO CRÍTICO (API /current): {e}"})
                     chuva_incremental = 0.0
 
-            # 4. Cálculo de Status (Provisório)
-            status_ponto, _ = definir_status_chuva(0.0)
-            status_calculados[id_ponto] = status_ponto
-
-            # 5. Criar os dados brutos
+            # 4. Criar os dados brutos
             dados_processados.append({
-                # --- INÍCIO DA CORREÇÃO (ARREDONDAMENTO DE TIMESTAMP) ---
-                "timestamp": timestamp_arredondado,  # <-- USA O VALOR ARREDONDADO
-                # --- FIM DA CORREÇÃO ---
+                "timestamp": timestamp_arredondado,
                 "id_ponto": id_ponto,
                 "chuva_mm": chuva_incremental,
                 "precipitacao_acumulada_mm": pd.NA,
-                "umidade_1m_perc": pd.NA, "umidade_2m_perc": pd.NA, "umidade_3m_perc": pd.NA,
-                "base_1m": pd.NA, "base_2m": pd.NA, "base_3m": pd.NA,
+                "umidade_1m_perc": umidade_1m,
+                "umidade_2m_perc": umidade_2m,
+                "umidade_3m_perc": umidade_3m,
+                "base_1m": pd.NA,
+                "base_2m": pd.NA,
+                "base_3m": pd.NA,
             })
 
-    return dados_processados, status_calculados, logs_api
+    # Retorna um DataFrame
+    return pd.DataFrame(dados_processados), status_calculados, logs_api
 
 
 # --- FUNÇÃO DE BACKFILL (REESCRITA PARA FAZER 3 CHAMADAS DE 24H) ---
@@ -417,25 +515,19 @@ def backfill_km67_pro_data():
     try:
         with httpx.Client(timeout=60.0) as client:
 
-            # Loop para fazer 3 chamadas de 24h
             for i in range(3):  # i = 0 (0-24h), i = 1 (24-48h), i = 2 (48-72h)
 
-                # 1. Definir Timestamps para esta chamada de 24h
                 end_dt = now_dt - datetime.timedelta(hours=24 * i)
                 start_dt = end_dt - datetime.timedelta(hours=24)  # 24h antes do fim
 
                 end_t = int(end_dt.timestamp())
                 start_t = int(start_dt.timestamp())
-
-                # 't' deve ser novo para cada requisição
                 t = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
                 print(f"[API {id_ponto}] Buscando Bloco {i + 1}/3 ({start_dt.date()} a {end_dt.date()})...")
 
-                # 2. Gerar Assinatura Histórica (Usando a função original, com 't' e 'station-id')
                 signature = calculate_hmac_signature_historic(api_key, api_secret, t, station_id, start_t, end_t)
 
-                # 3. Dicionário de parâmetros (o método que funciona)
                 params_requisicao = {
                     "api-key": api_key,
                     "api-signature": signature,
@@ -444,73 +536,65 @@ def backfill_km67_pro_data():
                     "t": str(t)
                 }
 
-                # 4. Fazer a requisição
                 response = client.get(url_base, params=params_requisicao)
 
                 print(f"[API {id_ponto}] URL (Bloco {i + 1}): {response.url}")
                 print(f"[API {id_ponto}] Status (Bloco {i + 1}): {response.status_code}.")
 
-                response.raise_for_status()  # Vai falhar aqui se não for 200
+                response.raise_for_status()
                 data = response.json()
 
-                # Removida a verificação 'code: 0' que causava o erro anterior
-
-                # 5. Extrair dados históricos deste bloco (LÓGICA ROBUSTA)
-
-                # Itera por todos os sensores retornados
                 for sensor in data.get('sensors', []):
-                    # Itera por todos os registros de dados dentro de cada sensor
                     for registro in sensor.get('data', []):
 
-                        # Procura ativamente por uma chave de chuva
                         chuva_incremental = registro.get('rain_in_mm')
                         if chuva_incremental is None:
-                            chuva_incremental = registro.get('rainfall_mm')  # Tenta a outra chave
+                            chuva_incremental = registro.get('rainfall_mm')
 
-                        # Se (e somente se) este registro continha dados de chuva, nós o salvamos
                         if chuva_incremental is not None:
-                            # --- INÍCIO DA CORREÇÃO (ARREDONDAMENTO DE TIMESTAMP) ---
                             ts_registro = arredondar_timestamp_15min(registro['ts'])
-                            # --- FIM DA CORREÇÃO ---
 
                             dados_processados.append({
                                 "timestamp": ts_registro,
                                 "id_ponto": id_ponto,
                                 "chuva_mm": chuva_incremental,
-                                # Deixa os outros campos como Nulos (NA)
                                 "precipitacao_acumulada_mm": pd.NA,
-                                "umidade_1m_perc": pd.NA, "umidade_2m_perc": pd.NA, "umidade_3m_perc": pd.NA,
-                                "base_1m": pd.NA, "base_2m": pd.NA, "base_3m": pd.NA,
+                                "umidade_1m_perc": pd.NA,
+                                "umidade_2m_perc": pd.NA,
+                                "umidade_3m_perc": pd.NA,
+                                "base_1m": pd.NA,
+                                "base_2m": pd.NA,
+                                "base_3m": pd.NA,
                             })
 
-                # Pequena pausa para não sobrecarregar a API
                 if i < 2:
                     time.sleep(1)
-
-                    # --- FIM DO LOOP ---
 
         if not dados_processados:
             adicionar_log(id_ponto, "AVISO (Backfill): API não retornou dados históricos (JSON vazio).")
             return
 
-        # 6. Salvar todos os dados agregados no CSV de uma vez
+        # 6. Salvar todos os dados agregados (DUAL SAVE)
         df_backfill = pd.DataFrame(dados_processados)
         df_backfill = df_backfill[COLUNAS_HISTORICO]
 
-        df_existente = read_historico_from_csv()
-
-        df_final = pd.concat([df_existente, df_backfill], ignore_index=True)
-        df_final['timestamp'] = pd.to_datetime(df_final['timestamp'])
-
-        # --- CORREÇÃO DE DUPLICATAS ---
-        # Garante que os timestamps arredondados sejam únicos, mantendo o último registro
-        df_final = df_final.sort_values(by='timestamp').drop_duplicates(
-            subset=['id_ponto', 'timestamp'], keep='last'
-        )
+        # --- CORREÇÃO (Etapa 2 do Backfill) ---
+        # Converte para datetime ANTES de salvar no SQLite
+        if 'timestamp' in df_backfill.columns:
+            df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
         # --- FIM DA CORREÇÃO ---
 
-        save_historico_to_csv(df_final)
-        adicionar_log(id_ponto, f"SUCESSO (Backfill): {len(df_backfill)} registros históricos de 72h (3x 24h) salvos.")
+        # B. Salva no SQLite (sem truncamento)
+        save_to_sqlite(df_backfill)
+
+        # A. Salva no CSV (com truncamento)
+        df_existente_csv = read_historico_from_csv()
+        df_final_csv = pd.concat([df_existente_csv, df_backfill], ignore_index=True)
+        df_final_csv['timestamp'] = pd.to_datetime(df_final_csv['timestamp'], utc=True)
+        save_historico_to_csv(df_final_csv)  # Esta função já trunca
+
+        adicionar_log(id_ponto,
+                      f"SUCESSO (Backfill): {len(df_backfill)} registros históricos de 72h (3x 24h) salvos (CSV e SQLite).")
 
     except httpx.HTTPStatusError as e:
         adicionar_log(id_ponto, f"ERRO HTTP (Backfill) ({e.response.status_code}): Falha ao coletar histórico.")
