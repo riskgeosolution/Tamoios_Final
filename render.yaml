@@ -1,8 +1,8 @@
-                          # render.yaml
+# render.yaml
 # Definição dos serviços, discos e chaves (Versão Corrigida v4)
 
 # 1. Definição do Disco Persistente
-# (Colocamos isso no topo para clareza)
+# (Esta seção DEVE estar no nível 0, sem indentação)
 disks:
   - name: tamoios-dados
     mountPath: /var/data
