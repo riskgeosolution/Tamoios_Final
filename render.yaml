@@ -1,6 +1,7 @@
 # render.yaml
-# Este arquivo define todos os nossos serviços para o Render.com
+# Definição dos serviços, discos e chaves (Versão Corrigida)
 
+# 1. Definição dos Serviços
 services:
   # --- Serviço 1: O Site (index.py) ---
   - type: web
@@ -10,9 +11,10 @@ services:
     plan: starter # $7/mês (nunca dorme)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
-    envGroup: tamoios-chaves # <-- O nome do nosso "cofre" de senhas
+    envGroups: # <-- CORRIGIDO (era envGroup)
+      - name: tamoios-chaves # <-- Link para o grupo que você já criou
     disks:
-      - name: tamoios-dados
+      - name: tamoios-dados # <-- Nome do disco que definimos abaixo
         mountPath: /var/data
 
   # --- Serviço 2: O Cérebro (worker.py) ---
@@ -23,12 +25,14 @@ services:
     plan: starter # $7/mês (roda 24/7)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
-    envGroup: tamoios-chaves # <-- Anexa o mesmo "cofre" de senhas
+    envGroups: # <-- CORRIGIDO (era envGroup)
+      - name: tamoios-chaves # <-- Link para o grupo que você já criou
     disks:
-      - name: tamoios-dados # <-- Anexa o mesmo disco
+      - name: tamoios-dados # <-- Nome do disco que definimos abaixo
         mountPath: /var/data
 
-# --- Definição do Disco Persistente ---
+# 2. Definição do Disco Persistente
+# (Esta seção DEVE estar no nível 0, sem indentação)
 disks:
   - name: tamoios-dados
     sizeGB: 1
