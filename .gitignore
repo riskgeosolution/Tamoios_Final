@@ -24,5 +24,4 @@ Thumbs.db
 .env
 
 # Ignorar os arquivos YAML e Procfile que não usamos mais
-render.yaml
 Procfile
