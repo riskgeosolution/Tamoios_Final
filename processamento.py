@@ -1,4 +1,4 @@
-# processamento.py (CORRIGIDO: Importação Circular)
+# processamento.py (CORRIGIDO v2: Corrigindo Importação Circular)
 
 import pandas as pd
 import datetime
@@ -164,7 +164,7 @@ def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
         return "grey"
 
 
-# --- NOVO: FUNÇÃO PARA LER LOGS DO DISCO ---
+# --- NOVO: FUNÇÃO PARA LER LOGS DO DISCO (CORRIGIDA) ---
 def ler_logs_eventos(id_ponto):
     """
     Lê o log do arquivo eventos.log e retorna o conteúdo filtrado como string.
@@ -174,17 +174,13 @@ def ler_logs_eventos(id_ponto):
     # --- FIM DA CORREÇÃO ---
 
     try:
-        # A função get_all_data_from_disk retorna logs_str como uma string grande
-        # Precisamos importá-la do data_source
-        logs_str, status_antigos_do_disco, _ = data_source.get_all_data_from_disk()
+        # --- INÍCIO DA CORREÇÃO (Lógica com Bug) ---
+        # Esta função agora só usa a importação local
 
         # O data_source.get_all_data_from_disk() retorna (historico_df, status, logs_str)
-        # O log string é o terceiro elemento retornado. Vamos ajusta a chamada para o log
-
-        # Ajustando a importação:
-        from data_source import get_all_data_from_disk
-
-        _, _, logs_str = get_all_data_from_disk()
+        # O log string é o terceiro elemento retornado.
+        _, _, logs_str = data_source.get_all_data_from_disk()
+        # --- FIM DA CORREÇÃO ---
 
         # Filtra a string de logs
         logs_list = logs_str.split('\n')
