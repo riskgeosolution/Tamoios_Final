@@ -25,3 +25,4 @@ Thumbs.db
 
 # Ignorar os arquivos YAML e Procfile que não usamos mais
 Procfile
+render.yaml
