@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO v8: Usando o Timestamp 'ts' da API)
+# data_source.py (CORRIGIDO v9: Corrigindo Importação Circular)
 
 import pandas as pd
 import json
@@ -88,7 +88,6 @@ def save_to_sqlite(df_novos_dados):
         df_novos_dados.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
         print(f"[SQLite] {len(df_novos_dados)} novos pontos salvos no DB.")
     except Exception as e:
-        # Erro comum é 'UNIQUE constraint failed' se o dado já existe.
         if "UNIQUE constraint failed" in str(e):
             print(f"[SQLite] Aviso: Dados duplicados para este timestamp. Ignorando.")
         else:
@@ -175,12 +174,9 @@ def read_historico_from_csv():
 
 def save_historico_to_csv(df):
     try:
-        # --- CORREÇÃO (Salvar duplicados) ---
-        # Garante que timestamps duplicados sejam removidos ANTES de salvar
         df_sem_duplicatas = df.sort_values(by='timestamp').drop_duplicates(
             subset=['id_ponto', 'timestamp'], keep='last')
 
-        # Aplica o truncamento de 72h
         max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
         df_truncado = df_sem_duplicatas.tail(max_pontos)
 
@@ -252,7 +248,6 @@ def executar_passo_api_e_salvar(historico_df_csv):
         save_to_sqlite(dados_api_df)
 
         historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
-        # (A conversão de timestamp já foi feita)
         save_historico_to_csv(historico_atualizado_df_csv)
 
         return dados_api_df, status_novos
@@ -293,15 +288,18 @@ def arredondar_timestamp_15min(ts_epoch):
     return dt_obj.isoformat()
 
 
-# --- INÍCIO DA ALTERAÇÃO (Lógica Robusta de Timestamp) ---
 def fetch_data_from_weatherlink_api(df_historico):
+    # --- INÍCIO DA CORREÇÃO (Importação Circular) ---
+    # Movido 'import processamento' para dentro da função
+    import processamento
+    # --- FIM DA CORREÇÃO ---
+
     WEATHERLINK_API_ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
     logs_api = []
     dados_processados = []
     status_calculados = {}
 
     t = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-    # REMOVIDO: timestamp_arredondado = arredondar_timestamp_15min(t)
 
     print("[API] COLETANDO DADOS (INCREMENTAL /current) DA WEATHERLINK")
 
@@ -318,8 +316,6 @@ def fetch_data_from_weatherlink_api(df_historico):
             umidade_2m = pd.NA
             umidade_3m = pd.NA
             mensagem_log = ""
-
-            # --- CORREÇÃO: Variável para o carimbo de data/hora ---
             timestamp_arredondado = None
 
             if "SUA_CHAVE_API" in api_key or "SEU_SEGREDO_API" in api_secret:
@@ -353,19 +349,14 @@ def fetch_data_from_weatherlink_api(df_historico):
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
                     continue
 
-                # --- INÍCIO DA CORREÇÃO DE TIMESTAMP ---
-                # 1. Pega o carimbo de data/hora DO SENSOR
                 ts_do_sensor = sensor_principal.get('ts')
 
                 if ts_do_sensor is None:
                     mensagem_log = "API: ERRO. Sensor não retornou um carimbo 'ts'. Usando hora local."
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
-                    # Fallback (comportamento antigo e ingênuo)
                     ts_do_sensor = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
-                # 2. Arredonda o carimbo DO SENSOR
                 timestamp_arredondado = arredondar_timestamp_15min(ts_do_sensor)
-                # --- FIM DA CORREÇÃO DE TIMESTAMP ---
 
                 chuva_incremental = sensor_principal.get('rainfall_last_15_min_mm')
                 precip_acumulada_dia = sensor_principal.get('rainfall_daily_mm')
@@ -388,14 +379,13 @@ def fetch_data_from_weatherlink_api(df_historico):
                 traceback.print_exc()
                 continue
 
-            # Se o timestamp não pôde ser definido (ex: erro antes da extração), pulamos
             if timestamp_arredondado is None:
                 logs_api.append(
                     {"id_ponto": id_ponto, "mensagem": "ERRO: Timestamp não pôde ser definido. Ponto ignorado."})
                 continue
 
             dados_processados.append({
-                "timestamp": timestamp_arredondado,  # <-- AGORA USA O CARIMBO CORRETO
+                "timestamp": timestamp_arredondado,
                 "id_ponto": id_ponto,
                 "chuva_mm": chuva_incremental,
                 "precipitacao_acumulada_mm": precip_acumulada_dia,
@@ -408,9 +398,6 @@ def fetch_data_from_weatherlink_api(df_historico):
             })
 
     return pd.DataFrame(dados_processados), status_calculados, logs_api
-
-
-# --- FIM DA ALTERAÇÃO ---
 
 
 def backfill_km67_pro_data(df_historico_existente):
@@ -457,7 +444,6 @@ def backfill_km67_pro_data(df_historico_existente):
 
                     for registro in sensor.get('data', []):
 
-                        # --- LÓGICA CORRIGIDA (Backfill v2) ---
                         chuva_incremental_hist = registro.get('rainfall_mm')
 
                         if chuva_incremental_hist is not None:
@@ -471,7 +457,6 @@ def backfill_km67_pro_data(df_historico_existente):
                                 "umidade_1m_perc": pd.NA, "umidade_2m_perc": pd.NA, "umidade_3m_perc": pd.NA,
                                 "base_1m": pd.NA, "base_2m": pd.NA, "base_3m": pd.NA,
                             })
-                        # --- FIM DA LÓGICA CORRIGIDA ---
 
                 if i < 2: time.sleep(1)
 
@@ -488,7 +473,6 @@ def backfill_km67_pro_data(df_historico_existente):
         save_to_sqlite(df_backfill)
 
         df_final_csv = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
-        df_final_csv['timestamp'] = pd.to_datetime(df_final_csv['timestamp'], utc=True)
         save_historico_to_csv(df_final_csv)
 
         adicionar_log(id_ponto,
@@ -500,4 +484,3 @@ def backfill_km67_pro_data(df_historico_existente):
     except Exception as e:
         adicionar_log(id_ponto, f"ERRO CRÍTICO (Backfill): {e}")
         traceback.print_exc()
-# --- FIM DA ALTERAÇÃO ---

@@ -1,12 +1,10 @@
-# processamento.py (CORRIGIDO: Função de acumulado reescrita para ser mais robusta)
+# processamento.py (CORRIGIDO: Importação Circular)
 
 import pandas as pd
 import datetime
 import traceback  # Importar traceback
 
-# --- IMPORTS NECESSÁRIAS ---
-import data_source
-# --- FIM IMPORTS NECESSÁRIAS ---
+# --- REMOVIDO: import data_source ---
 
 # --- Importações Corrigidas ---
 from config import (
@@ -171,6 +169,10 @@ def ler_logs_eventos(id_ponto):
     """
     Lê o log do arquivo eventos.log e retorna o conteúdo filtrado como string.
     """
+    # --- INÍCIO DA CORREÇÃO (Importação Circular) ---
+    import data_source
+    # --- FIM DA CORREÇÃO ---
+
     try:
         # A função get_all_data_from_disk retorna logs_str como uma string grande
         # Precisamos importá-la do data_source
