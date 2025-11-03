@@ -1,25 +1,16 @@
 # render.yaml
-# Versão Corrigida v5 - Sintaxe correta para disco compartilhado
+# Definição dos serviços, discos e chaves (Versão Corrigida v6)
 
+# 1. Definição do Disco Persistente
+# (Esta seção é de nível superior, sem indentação)
+disks:
+  - name: tamoios-dados
+    mountPath: /var/data
+    sizeGB: 1
+
+# 2. Definição dos Serviços
 services:
-  # --- Serviço 1: O Cérebro (worker.py) ---
-  # (Este serviço CRIA o disco)
-  - type: worker
-    name: tamoios-worker
-    region: ohio
-    env: python
-    plan: starter
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python worker.py"
-    envVars:
-      - fromGroup: tamoios-chaves # Anexa o "cofre" de senhas
-    disk:
-      name: tamoios-dados
-      mountPath: /var/data
-      sizeGB: 1
-
-  # --- Serviço 2: O Site (index.py) ---
-  # (Este serviço ANEXA o disco existente)
+  # --- Serviço 1: O Site (index.py) ---
   - type: web
     name: tamoios-site
     region: ohio
@@ -28,7 +19,21 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
     envVars:
+      - fromGroup: tamoios-chaves # Anexa o "cofre" de senhas
+    disk: # <-- Anexa o disco definido acima
+      name: tamoios-dados
+      mountPath: /var/data
+
+  # --- Serviço 2: O Cérebro (worker.py) ---
+  - type: worker
+    name: tamoios-worker
+    region: ohio
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python worker.py"
+    envVars:
       - fromGroup: tamoios-chaves # Anexa o mesmo "cofre"
-    disk:
-      name: tamoios-dados # Anexa o disco 'tamoios-dados'
+    disk: # <-- Anexa o mesmo disco
+      name: tamoios-dados
       mountPath: /var/data
