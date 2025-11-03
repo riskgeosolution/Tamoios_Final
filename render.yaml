@@ -1,18 +1,20 @@
 # render.yaml
-# Versão Corrigida v7 - Sintaxe correta com seções-raiz
+# v8 - Corrigindo a estrutura de nível superior (root-level)
 
 # 1. Definição do "Cofre" de Senhas
-# (O Render vai ler este nome e conectá-lo ao grupo que você já criou)
+# (O Render vai ler este nome e conectá-lo ao grupo que você criou no painel)
 envVarGroups:
   - name: tamoios-chaves
 
 # 2. Definição do "HD Virtual"
+# (Define o disco que será criado)
 disks:
   - name: tamoios-dados
     mountPath: /var/data
     sizeGB: 1
 
 # 3. Definição dos Programas
+# (Define os serviços e ANEXA os recursos acima)
 services:
   # --- Serviço 1: O Cérebro (worker.py) ---
   - type: worker
@@ -22,9 +24,9 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
-    envGroups: # Anexa o cofre
-      - name: tamoios-chaves
-    disk: # Anexa o disco
+    envVars: # <-- Esta é a seção para ANEXAR variáveis
+      - fromGroup: tamoios-chaves # <-- Sintaxe correta
+    disk: # <-- Esta é a seção para ANEXAR o disco
       name: tamoios-dados
       mountPath: /var/data
 
@@ -36,8 +38,8 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
-    envGroups: # Anexa o cofre
-      - name: tamoios-chaves
-    disk: # Anexa o mesmo disco
+    envVars:
+      - fromGroup: tamoios-chaves
+    disk:
       name: tamoios-dados
       mountPath: /var/data
