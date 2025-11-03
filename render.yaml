@@ -1,0 +1,43 @@
+# render.yaml
+# Versão Corrigida v7 - Sintaxe correta com seções-raiz
+
+# 1. Definição do "Cofre" de Senhas
+# (O Render vai ler este nome e conectá-lo ao grupo que você já criou)
+envVarGroups:
+  - name: tamoios-chaves
+
+# 2. Definição do "HD Virtual"
+disks:
+  - name: tamoios-dados
+    mountPath: /var/data
+    sizeGB: 1
+
+# 3. Definição dos Programas
+services:
+  # --- Serviço 1: O Cérebro (worker.py) ---
+  - type: worker
+    name: tamoios-worker
+    region: ohio
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python worker.py"
+    envGroups: # Anexa o cofre
+      - name: tamoios-chaves
+    disk: # Anexa o disco
+      name: tamoios-dados
+      mountPath: /var/data
+
+  # --- Serviço 2: O Site (index.py) ---
+  - type: web
+    name: tamoios-site
+    region: ohio
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:server"
+    envGroups: # Anexa o cofre
+      - name: tamoios-chaves
+    disk: # Anexa o mesmo disco
+      name: tamoios-dados
+      mountPath: /var/data
