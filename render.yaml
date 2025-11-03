@@ -1,8 +1,8 @@
 # render.yaml
-# Definição dos serviços, discos e chaves (Versão Corrigida v3)
+# Definição dos serviços, discos e chaves (Versão Corrigida v4)
 
 # 1. Definição do Disco Persistente
-# (Colocamos isso no topo para clareza)
+# (Esta seção DEVE estar no nível 0, sem indentação)
 disks:
   - name: tamoios-dados
     mountPath: /var/data
@@ -18,11 +18,11 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
-    envGroups:
-      - name: tamoios-chaves # <-- Anexa o "cofre" de senhas
-    disks:
-      - name: tamoios-dados # <-- Anexa o disco definido acima
-        mountPath: /var/data
+    envVars: # <-- CORRIGIDO: A chave correta é 'envVars'
+      - fromGroup: tamoios-chaves # <-- CORRIGIDO: Esta é a sintaxe de anexo
+    disk: # <-- CORRIGIDO: A chave correta é 'disk' (singular)
+      name: tamoios-dados
+      mountPath: /var/data
 
   # --- Serviço 2: O Cérebro (worker.py) ---
   - type: worker
@@ -32,8 +32,8 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
-    envGroups:
-      - name: tamoios-chaves # <-- Anexa o mesmo "cofre" de senhas
-    disks:
-      - name: tamoios-dados # <-- Anexa o mesmo disco
-        mountPath: /var/data
+    envVars: # <-- CORRIGIDO
+      - fromGroup: tamoios-chaves # <-- CORRIGIDO
+    disk: # <-- CORRIGIDO
+      name: tamoios-dados
+      mountPath: /var/data
