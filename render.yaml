@@ -1,20 +1,27 @@
 # render.yaml
-# Definição dos serviços, discos e chaves (Versão Corrigida)
+# Definição dos serviços, discos e chaves (Versão Corrigida v3)
 
-# 1. Definição dos Serviços
+# 1. Definição do Disco Persistente
+# (Colocamos isso no topo para clareza)
+disks:
+  - name: tamoios-dados
+    mountPath: /var/data
+    sizeGB: 1
+
+# 2. Definição dos Serviços
 services:
   # --- Serviço 1: O Site (index.py) ---
   - type: web
     name: tamoios-site
     region: ohio
     env: python
-    plan: starter # $7/mês (nunca dorme)
+    plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
-    envGroups: # <-- CORRIGIDO (era envGroup)
-      - name: tamoios-chaves # <-- Link para o grupo que você já criou
+    envGroups:
+      - name: tamoios-chaves # <-- Anexa o "cofre" de senhas
     disks:
-      - name: tamoios-dados # <-- Nome do disco que definimos abaixo
+      - name: tamoios-dados # <-- Anexa o disco definido acima
         mountPath: /var/data
 
   # --- Serviço 2: O Cérebro (worker.py) ---
@@ -22,17 +29,11 @@ services:
     name: tamoios-worker
     region: ohio
     env: python
-    plan: starter # $7/mês (roda 24/7)
+    plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
-    envGroups: # <-- CORRIGIDO (era envGroup)
-      - name: tamoios-chaves # <-- Link para o grupo que você já criou
+    envGroups:
+      - name: tamoios-chaves # <-- Anexa o mesmo "cofre" de senhas
     disks:
-      - name: tamoios-dados # <-- Nome do disco que definimos abaixo
+      - name: tamoios-dados # <-- Anexa o mesmo disco
         mountPath: /var/data
-
-# 2. Definição do Disco Persistente
-# (Esta seção DEVE estar no nível 0, sem indentação)
-disks:
-  - name: tamoios-dados
-    sizeGB: 1
