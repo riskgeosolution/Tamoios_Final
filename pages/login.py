@@ -1,4 +1,4 @@
-# pages/login.py (FINAL CORRIGIDO: Fundo do Card Transparente)
+# pages/login.py (CORRIGIDO: Texto do título alterado)
 
 import dash
 from dash import html, dcc
@@ -55,7 +55,9 @@ def get_layout():
                         ),
                         # --- FIM DA ALTERAÇÃO ---
 
-                        html.H4("Sistema de Monitoramento", className="card-title text-center mb-4"),
+                        # --- INÍCIO DA ALTERAÇÃO DO TÍTULO ---
+                        html.H4("Sistema de Monitoramento Geoambiental", className="card-title text-center mb-4"),
+                        # --- FIM DA ALTERAÇÃO DO TÍTULO ---
 
                         # Mensagem de erro (inicialmente vazia)
                         html.Div(id='login-error-output', className="text-danger mb-3 text-center"),

@@ -1,4 +1,4 @@
-# pages/main_app.py (CORRIGIDO: Otimização da Navbar para caber o botão Sair)
+# pages/main_app.py (CORRIGIDO: Texto do título alterado)
 
 import dash
 from dash import html, dcc
@@ -38,11 +38,10 @@ def get_navbar():
                             width="auto",
                         ),
                         dbc.Col(
-                            # --- INÍCIO DA ALTERAÇÃO 2: Redução da Fonte do Título ---
-                            html.H4("SISTEMA DE MONITORAMENTO TAMOIOS", className="mb-0 text-center",
+                            # --- INÍCIO DA ALTERAÇÃO DO TÍTULO ---
+                            html.H4("SISTEMA DE MONITORAMENTO GEOAMBIENTAL", className="mb-0 text-center",
                                     style={'fontWeight': 'bold', 'color': 'white', 'font-size': '1.3rem'}),
-                            # Reduzido o tamanho da fonte
-                            # --- FIM DA ALTERAÇÃO ---
+                            # --- FIM DA ALTERAÇÃO DO TÍTULO ---
                             width="auto",
                         ),
                         dbc.Col(

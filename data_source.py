@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO v5: Usando os nomes de campos corretos da API)
+# data_source.py (CORRIGIDO v8: Usando o Timestamp 'ts' da API)
 
 import pandas as pd
 import json
@@ -88,8 +88,12 @@ def save_to_sqlite(df_novos_dados):
         df_novos_dados.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
         print(f"[SQLite] {len(df_novos_dados)} novos pontos salvos no DB.")
     except Exception as e:
-        adicionar_log("GERAL", f"ERRO CRÍTICO ao salvar no SQLite: {e}")
-        print(f"ERRO CRÍTICO ao salvar no SQLite: {e}")
+        # Erro comum é 'UNIQUE constraint failed' se o dado já existe.
+        if "UNIQUE constraint failed" in str(e):
+            print(f"[SQLite] Aviso: Dados duplicados para este timestamp. Ignorando.")
+        else:
+            adicionar_log("GERAL", f"ERRO CRÍTICO ao salvar no SQLite: {e}")
+            print(f"ERRO CRÍTICO ao salvar no SQLite: {e}")
 
 
 def migrate_csv_to_sqlite_initial():
@@ -171,9 +175,15 @@ def read_historico_from_csv():
 
 def save_historico_to_csv(df):
     try:
+        # --- CORREÇÃO (Salvar duplicados) ---
+        # Garante que timestamps duplicados sejam removidos ANTES de salvar
+        df_sem_duplicatas = df.sort_values(by='timestamp').drop_duplicates(
+            subset=['id_ponto', 'timestamp'], keep='last')
+
+        # Aplica o truncamento de 72h
         max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
-        df_truncado = df.sort_values(by='timestamp').drop_duplicates(
-            subset=['id_ponto', 'timestamp'], keep='last').tail(max_pontos)
+        df_truncado = df_sem_duplicatas.tail(max_pontos)
+
         df_truncado.to_csv(HISTORICO_FILE_CSV, index=False)
         print(f"[CSV] Histórico salvo no arquivo (Mantidas {len(df_truncado)} entradas).")
     except Exception as e:
@@ -212,12 +222,11 @@ def get_all_data_from_disk():
 
 def executar_passo_api_e_salvar(historico_df_csv):
     try:
-        # Passa o histórico (vazio ou não) para a função de coleta
         dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api(historico_df_csv)
         for log in logs_api:
             mensagem_log_completa = f"| {log['id_ponto']} | {log['mensagem']}"
-            print(mensagem_log_completa)  # Imprime no console
-            adicionar_log(log['id_ponto'], log['mensagem'])  # Salva no arquivo
+            print(mensagem_log_completa)
+            adicionar_log(log['id_ponto'], log['mensagem'])
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO (fetch_data): {e}")
         traceback.print_exc()
@@ -243,7 +252,7 @@ def executar_passo_api_e_salvar(historico_df_csv):
         save_to_sqlite(dados_api_df)
 
         historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
-        historico_atualizado_df_csv['timestamp'] = pd.to_datetime(historico_atualizado_df_csv['timestamp'], utc=True)
+        # (A conversão de timestamp já foi feita)
         save_historico_to_csv(historico_atualizado_df_csv)
 
         return dados_api_df, status_novos
@@ -284,20 +293,15 @@ def arredondar_timestamp_15min(ts_epoch):
     return dt_obj.isoformat()
 
 
-# --- INÍCIO DA ALTERAÇÃO (Lógica Unificada - Usando Nomes Corretos) ---
+# --- INÍCIO DA ALTERAÇÃO (Lógica Robusta de Timestamp) ---
 def fetch_data_from_weatherlink_api(df_historico):
-    """
-    Busca dados /CURRENT para TODOS os 4 pontos.
-    Usa 'rainfall_last_15_min_mm' como o incremento de chuva (chuva_mm).
-    Usa 'rainfall_daily_mm' como o total do dia (precipitacao_acumulada_mm).
-    """
     WEATHERLINK_API_ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
     logs_api = []
     dados_processados = []
     status_calculados = {}
 
     t = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-    timestamp_arredondado = arredondar_timestamp_15min(t)
+    # REMOVIDO: timestamp_arredondado = arredondar_timestamp_15min(t)
 
     print("[API] COLETANDO DADOS (INCREMENTAL /current) DA WEATHERLINK")
 
@@ -314,6 +318,9 @@ def fetch_data_from_weatherlink_api(df_historico):
             umidade_2m = pd.NA
             umidade_3m = pd.NA
             mensagem_log = ""
+
+            # --- CORREÇÃO: Variável para o carimbo de data/hora ---
+            timestamp_arredondado = None
 
             if "SUA_CHAVE_API" in api_key or "SEU_SEGREDO_API" in api_secret:
                 mensagem_log = f"AVISO API: Credenciais para {id_ponto} não preenchidas. Pulando."
@@ -335,13 +342,8 @@ def fetch_data_from_weatherlink_api(df_historico):
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
                     continue
 
-                # --- LÓGICA DE EXTRAÇÃO CORRIGIDA ---
-                # As estações Pro e Basic enviam os mesmos dados no sensor principal
-
-                # Encontra o sensor principal (o que tem os dados de chuva)
                 sensor_principal = None
                 for sensor in data.get('sensors', []):
-                    # O sensor_type 48 é o 'Integrated Sensor Suite' (ISS)
                     if sensor.get('sensor_type') == 48 and sensor.get('data'):
                         sensor_principal = sensor['data'][0]
                         break
@@ -351,13 +353,23 @@ def fetch_data_from_weatherlink_api(df_historico):
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
                     continue
 
-                # 1. Pega o Incremento de 15 min (para nosso acumulado de 72h)
-                chuva_incremental = sensor_principal.get('rainfall_last_15_min_mm')
+                # --- INÍCIO DA CORREÇÃO DE TIMESTAMP ---
+                # 1. Pega o carimbo de data/hora DO SENSOR
+                ts_do_sensor = sensor_principal.get('ts')
 
-                # 2. Pega o Total do Dia (para salvar no histórico)
+                if ts_do_sensor is None:
+                    mensagem_log = "API: ERRO. Sensor não retornou um carimbo 'ts'. Usando hora local."
+                    logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
+                    # Fallback (comportamento antigo e ingênuo)
+                    ts_do_sensor = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+                # 2. Arredonda o carimbo DO SENSOR
+                timestamp_arredondado = arredondar_timestamp_15min(ts_do_sensor)
+                # --- FIM DA CORREÇÃO DE TIMESTAMP ---
+
+                chuva_incremental = sensor_principal.get('rainfall_last_15_min_mm')
                 precip_acumulada_dia = sensor_principal.get('rainfall_daily_mm')
 
-                # Verifica se os campos existem
                 if chuva_incremental is None:
                     mensagem_log = "API: ERRO. Campo 'rainfall_last_15_min_mm' não encontrado. Salvando 0."
                     chuva_incremental = 0.0
@@ -365,7 +377,6 @@ def fetch_data_from_weatherlink_api(df_historico):
                     mensagem_log = f"API: Sucesso. Chuva 15min: {chuva_incremental:.2f}mm. Total Dia: {precip_acumulada_dia:.2f}mm"
 
                 logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
-                # --- FIM DA LÓGICA DE EXTRAÇÃO ---
 
             except httpx.HTTPStatusError as e:
                 mensagem_log = f"ERRO HTTP ({e.response.status_code}): Falha ao coletar dados."
@@ -377,8 +388,14 @@ def fetch_data_from_weatherlink_api(df_historico):
                 traceback.print_exc()
                 continue
 
+            # Se o timestamp não pôde ser definido (ex: erro antes da extração), pulamos
+            if timestamp_arredondado is None:
+                logs_api.append(
+                    {"id_ponto": id_ponto, "mensagem": "ERRO: Timestamp não pôde ser definido. Ponto ignorado."})
+                continue
+
             dados_processados.append({
-                "timestamp": timestamp_arredondado,
+                "timestamp": timestamp_arredondado,  # <-- AGORA USA O CARIMBO CORRETO
                 "id_ponto": id_ponto,
                 "chuva_mm": chuva_incremental,
                 "precipitacao_acumulada_mm": precip_acumulada_dia,
@@ -396,12 +413,7 @@ def fetch_data_from_weatherlink_api(df_historico):
 # --- FIM DA ALTERAÇÃO ---
 
 
-# --- INÍCIO DA ALTERAÇÃO (Backfill removido do worker, mas mantido aqui) ---
 def backfill_km67_pro_data(df_historico_existente):
-    """
-    (Esta função não é mais chamada pelo worker, mas está aqui para uso manual)
-    Busca os últimos 3 dias (72h) de dados históricos para o KM 67 (Plano Pro)
-    """
     id_ponto = "Ponto-A-KM67"
     station_config = WEATHERLINK_CONFIG[id_ponto]
     station_id = station_config['STATION_ID']
@@ -440,13 +452,12 @@ def backfill_km67_pro_data(df_historico_existente):
                 data = response.json()
 
                 for sensor in data.get('sensors', []):
-                    # Procura pelo sensor ISS (type 48)
                     if sensor.get('sensor_type') != 48:
                         continue
 
                     for registro in sensor.get('data', []):
-                        # --- LÓGICA CORRIGIDA ---
-                        # No histórico, o campo é 'rainfall_mm' (NÃO 'last_15_min_mm')
+
+                        # --- LÓGICA CORRIGIDA (Backfill v2) ---
                         chuva_incremental_hist = registro.get('rainfall_mm')
 
                         if chuva_incremental_hist is not None:
@@ -455,7 +466,7 @@ def backfill_km67_pro_data(df_historico_existente):
                             dados_processados.append({
                                 "timestamp": ts_registro,
                                 "id_ponto": id_ponto,
-                                "chuva_mm": chuva_incremental_hist,  # <-- VALOR CORRETO
+                                "chuva_mm": chuva_incremental_hist,
                                 "precipitacao_acumulada_mm": precip_acumulada_dia,
                                 "umidade_1m_perc": pd.NA, "umidade_2m_perc": pd.NA, "umidade_3m_perc": pd.NA,
                                 "base_1m": pd.NA, "base_2m": pd.NA, "base_3m": pd.NA,
