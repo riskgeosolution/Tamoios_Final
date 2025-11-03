@@ -1,0 +1,34 @@
+# render.yaml
+# Este arquivo define todos os nossos serviços para o Render.com
+
+services:
+  # --- Serviço 1: O Site (index.py) ---
+  - type: web
+    name: tamoios-site
+    region: ohio
+    env: python
+    plan: starter # $7/mês (nunca dorme)
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:server"
+    envGroup: tamoios-chaves # <-- Anexa o "cofre" de senhas
+    disks:
+      - name: tamoios-dados
+        mountPath: /var/data
+
+  # --- Serviço 2: O Cérebro (worker.py) ---
+  - type: worker
+    name: tamoios-worker
+    region: ohio
+    env: python
+    plan: starter # $7/mês (roda 24/7)
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python worker.py"
+    envGroup: tamoios-chaves # <-- Anexa o mesmo "cofre" de senhas
+    disks:
+      - name: tamoios-dados # <-- Anexa o mesmo disco
+        mountPath: /var/data
+
+# --- Definição do Disco Persistente ---
+disks:
+  - name: tamoios-dados
+    sizeGB: 1
