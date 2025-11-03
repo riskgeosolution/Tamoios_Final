@@ -10,7 +10,7 @@ services:
     plan: starter # $7/mês (nunca dorme)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:server"
-    envGroup: tamoios-chaves # <-- Anexa o "cofre" de senhas
+    envGroup: tamoios-chaves # <-- O nome do nosso "cofre" de senhas
     disks:
       - name: tamoios-dados
         mountPath: /var/data
