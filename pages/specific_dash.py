@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO v5: Lógica de Fim do Dia no Fuso Horário Local)
+# pages/specific_dash.py (CORRIGIDO: Data/Hora dos logs em fuso local)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -452,7 +452,7 @@ def toggle_logs_modal(n_open, n_close, is_open):
     return is_open
 
 
-# Callback para Carregar o Conteúdo do Log no Modal
+# --- INÍCIO DA ALTERAÇÃO (Filtro de Logs + Formato de Data/Hora) ---
 @app.callback(
     Output('modal-logs-content', 'children'),
     Input('modal-logs', 'is_open'),  # Disparado quando o modal abre/fecha
@@ -476,10 +476,17 @@ def load_logs_content(is_open, id_ponto, logs_json):
         if not logs_list:
             return "Nenhum evento registrado."
 
-        logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
+        # 1. Filtra logs por ponto ou GERAL
+        logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
+
+        # 2. NOVO FILTRO: Esconde mensagens de "API: Sucesso"
+        logs_filtrados = [
+            log for log in logs_ponto_ou_geral
+            if "API: Sucesso" not in log
+        ]
 
         if not logs_filtrados:
-            return f"Nenhum evento específico registrado para o ponto {id_ponto}."
+            return f"Nenhum evento crítico ou mudança de status registrada para o ponto {id_ponto}."
 
         logs_formatados = []
         for log_str in reversed(logs_filtrados):  # Mostra os mais recentes primeiro
@@ -488,9 +495,22 @@ def load_logs_content(is_open, id_ponto, logs_json):
                 logs_formatados.append(html.P(log_str))
                 continue
 
-            timestamp_str = parts[0].strip()
+            # --- INÍCIO DA FORMATAÇÃO DE DATA/HORA ---
+            timestamp_str_utc_iso = parts[0].strip()
             ponto_str = parts[1].strip()
             msg_str = "|".join(parts[2:]).strip()
+
+            try:
+                # Converte a string ISO (que já é UTC) para um datetime object
+                dt_utc = pd.to_datetime(timestamp_str_utc_iso)
+                # Converte para o fuso horário de São Paulo
+                dt_local = dt_utc.tz_convert('America/Sao_Paulo')
+                # Formata no padrão brasileiro
+                timestamp_formatado = dt_local.strftime('%d/%m/%Y %H:%M:%S')
+            except Exception as e:
+                # Se falhar, apenas usa a data original (sem o +00:00 e 'T')
+                timestamp_formatado = timestamp_str_utc_iso.split('+')[0].replace('T', ' ')
+            # --- FIM DA FORMATAÇÃO DE DATA/HORA ---
 
             cor = "black"
             if "ERRO" in msg_str:
@@ -501,7 +521,7 @@ def load_logs_content(is_open, id_ponto, logs_json):
                 cor = "blue"
 
             logs_formatados.append(html.P([
-                html.Strong(f"{timestamp_str} [{ponto_str}]: ", style={'color': cor}),
+                html.Strong(f"{timestamp_formatado} [{ponto_str}]: ", style={'color': cor}),
                 html.Span(msg_str, style={'color': cor})
             ], className="mb-1"))
 
@@ -511,6 +531,9 @@ def load_logs_content(is_open, id_ponto, logs_json):
         print(f"ERRO CRÍTICO no Carregamento de Logs:")
         traceback.print_exc()
         return f"Erro ao formatar logs: {e}"
+
+
+# --- FIM DA ALTERAÇÃO ---
 
 
 # --- INÍCIO DA ALTERAÇÃO v5 (Fuso Horário Local no Fim do Dia) ---
@@ -535,13 +558,9 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         start_dt = pd.to_datetime(start_date).tz_localize('UTC')
 
         # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
-        # 1. Pega a data final (ex: '2025-11-01')
         end_dt_naive = pd.to_datetime(end_date)
-        # 2. Localiza ela no fuso de SP (ex: '2025-11-01 00:00:00-03:00')
         end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
-        # 3. Adiciona 1 dia e subtrai 1 segundo (ex: '2025-11-01 23:59:59-03:00')
         end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        # 4. Converte para UTC para a query (ex: '2025-11-02 02:59:59+00:00')
         end_dt = end_dt_local_final.tz_convert('UTC')
         # --- FIM DA CORREÇÃO ---
 
@@ -658,13 +677,9 @@ def generate_data_excel(n_clicks, start_date, end_date, id_ponto):
         start_dt = pd.to_datetime(start_date).tz_localize('UTC')
 
         # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
-        # 1. Pega a data final (ex: '2025-11-01')
         end_dt_naive = pd.to_datetime(end_date)
-        # 2. Localiza ela no fuso de SP (ex: '2025-11-01 00:00:00-03:00')
         end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
-        # 3. Adiciona 1 dia e subtrai 1 segundo (ex: '2025-11-01 23:59:59-03:00')
         end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        # 4. Converte para UTC para a query (ex: '2025-11-02 02:59:59+00:00')
         end_dt = end_dt_local_final.tz_convert('UTC')
         # --- FIM DA CORREÇÃO ---
 
@@ -743,7 +758,16 @@ def generate_logs_pdf(n_clicks, logs_json, id_ponto):
             logs_list = json.loads(logs_json)
 
         logs_list = [log.strip() for log in logs_list if log.strip()]
-        logs_to_pdf = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
+
+        # --- INÍCIO DA ALTERAÇÃO (Filtro de Logs) ---
+        # 1. Filtra por ponto
+        logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
+        # 2. Esconde "API: Sucesso"
+        logs_to_pdf = [
+            log for log in logs_ponto_ou_geral
+            if "API: Sucesso" not in log
+        ]
+        # --- FIM DA ALTERAÇÃO ---
 
         if not logs_to_pdf:
             return dash.no_update

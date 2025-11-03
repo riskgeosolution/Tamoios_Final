@@ -1,4 +1,4 @@
-# worker.py (CORRIGIDO v3: Reintroduzindo o Backfill)
+# worker.py (CORRIGIDO v6: Corrigindo o bug "ValueError: second must be in 0..59")
 
 import pandas as pd
 import time
@@ -35,14 +35,28 @@ def verificar_alertas(status_novos, status_antigos):
         status_antigo = status_antigos.get(id_ponto, "INDEFINIDO")
 
         if status_novo != status_antigo:
-            status_atualizado[id_ponto] = status_novo
+
+            try:
+                nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
+                mensagem_log = f"MUDANÇA DE STATUS: {nome_ponto} mudou de {status_antigo} para {status_novo}."
+                data_source.adicionar_log(id_ponto, mensagem_log)
+                print(f"| {id_ponto} | {mensagem_log}")
+            except Exception as e:
+                print(f"Erro ao gerar log de mudança de status: {e}")
 
             # (A lógica de envio de alertas.enviar_alerta() vai aqui)
+            # alertas.enviar_alerta(id_ponto, PONTOS_DE_ANALISE[id_ponto]['nome'], status_novo, status_antigo)
+
+            status_atualizado[id_ponto] = status_novo
 
     return status_atualizado
 
 
 def main_loop():
+    """
+    Executa UM ciclo de coleta e processamento.
+    Retorna True se foi bem-sucedido, False se falhou.
+    """
     inicio_ciclo = time.time()
 
     try:
@@ -56,19 +70,16 @@ def main_loop():
 
         print(f"WORKER: Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
-        # --- INÍCIO DA ALTERAÇÃO (BACKFILL REATIVADO) ---
-        # Verifica se o Ponto A (KM 67) tem dados. Se não tiver, busca o histórico.
+        # --- LÓGICA DE BACKFILL (só roda se os arquivos estiverem vazios) ---
         if historico_df.empty or historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67'].empty:
             print("[Worker] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
             try:
-                # Chama a função de backfill (que salva no CSV e SQLite)
                 data_source.backfill_km67_pro_data(historico_df)
-                # Recarrega o histórico (agora com dados do KM 67)
                 historico_df, _, _ = data_source.get_all_data_from_disk()
                 print(f"[Worker] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-        # --- FIM DA ALTERAÇÃO ---
+        # --- FIM DO BACKFILL ---
 
         # 2. COLETAR NOVOS DADOS DA API
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
@@ -84,7 +95,6 @@ def main_loop():
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
 
-                # Calcula o acumulado de 72h
                 acumulado_72h_df = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
 
                 if not acumulado_72h_df.empty:
@@ -107,29 +117,68 @@ def main_loop():
             data_source.adicionar_log("GERAL", f"ERRO CRÍTICO ao salvar status: {e}")
 
         print(f"WORKER: Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
+        return True
 
     except Exception as e:
         print(f"WORKER ERRO CRÍTICO no loop principal: {e}")
         traceback.print_exc()
         data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (loop principal): {e}")
-
-    # 7. GERENCIAMENTO DO TEMPO DE ESPERA
-    tempo_execucao = time.time() - inicio_ciclo
-    tempo_espera = FREQUENCIA_API_SEGUNDOS - tempo_execucao
-
-    if tempo_espera > 0:
-        print(f"WORKER: Aguardando {tempo_espera:.0f}s até o próximo ciclo...")
-        time.sleep(tempo_espera)
-    else:
-        print(
-            f"AVISO WORKER: O ciclo levou {tempo_execucao:.0f}s (mais que a frequência de {FREQUENCIA_API_SEGUNDOS}s).")
-        data_source.adicionar_log("GERAL", f"AVISO: Ciclo levou {tempo_execucao:.0f}s, (maior que a frequência).")
+        return False
 
 
+# ==============================================================================
+# --- NOVO: LÓGICA DE EXECUÇÃO "INTELIGENTE" (CORRIGIDA) ---
+# ==============================================================================
 if __name__ == "__main__":
     data_source.setup_disk_paths()
-    print("--- Processo Worker Iniciado ---")
+    print("--- Processo Worker Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker iniciado com sucesso.")
 
+    INTERVALO_EM_MINUTOS = 15
+    CARENCIA_EM_SEGUNDOS = 60  # 1 minuto de "folga"
+
     while True:
+        inicio_total = time.time()
+
+        # 1. Roda o ciclo de coleta
         main_loop()
+
+        tempo_execucao = time.time() - inicio_total
+
+        # 2. Pega a hora atual (UTC)
+        agora_utc = datetime.datetime.now(datetime.timezone.utc)
+
+        # 3. Calcula quando o *próximo* ciclo de 15 min começa
+        proximo_minuto_base = (agora_utc.minute // INTERVALO_EM_MINUTOS + 1) * INTERVALO_EM_MINUTOS
+
+        proxima_hora_utc = agora_utc
+
+        # 4. Lida com a virada da hora (ex: 10:47 -> 11:00)
+        if proximo_minuto_base >= 60:
+            proxima_hora_utc = agora_utc + datetime.timedelta(hours=1)
+            proximo_minuto_base = 0
+
+        # --- INÍCIO DA CORREÇÃO ---
+        # 5. Define a hora exata da próxima execução (a hora "base")
+        proxima_execucao_base_utc = proxima_hora_utc.replace(
+            minute=proximo_minuto_base,
+            second=0,
+            microsecond=0
+        )
+
+        # 6. Adiciona o período de carência (a "folga")
+        proxima_execucao_com_carencia_utc = proxima_execucao_base_utc + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
+
+        # 7. Calcula quantos segundos dormir até lá
+        tempo_para_dormir_seg = (proxima_execucao_com_carencia_utc - agora_utc).total_seconds()
+        # --- FIM DA CORREÇÃO ---
+
+        # 8. Garante que não dormimos um tempo negativo
+        if tempo_para_dormir_seg < 0:
+            print(f"AVISO: O ciclo demorou {tempo_execucao:.1f}s e perdeu a janela. Rodando novamente...")
+            tempo_para_dormir_seg = 1
+
+        print(f"WORKER: Ciclo levou {tempo_execucao:.1f}s.")
+        print(
+            f"WORKER: Próxima execução às {proxima_execucao_com_carencia_utc.isoformat()}. Dormindo por {tempo_para_dormir_seg:.0f}s...")
+        time.sleep(tempo_para_dormir_seg)
