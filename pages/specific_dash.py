@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO: Data/Hora dos logs em fuso local)
+# pages/specific_dash.py (CORRIGIDO v6: Final para geração de PDF mais robusta)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -453,6 +453,7 @@ def toggle_logs_modal(n_open, n_close, is_open):
 
 
 # --- INÍCIO DA ALTERAÇÃO (Filtro de Logs + Formato de Data/Hora) ---
+# Callback para Carregar o Conteúdo do Log no Modal
 @app.callback(
     Output('modal-logs-content', 'children'),
     Input('modal-logs', 'is_open'),  # Disparado quando o modal abre/fecha
@@ -533,10 +534,7 @@ def load_logs_content(is_open, id_ponto, logs_json):
         return f"Erro ao formatar logs: {e}"
 
 
-# --- FIM DA ALTERAÇÃO ---
-
-
-# --- INÍCIO DA ALTERAÇÃO v5 (Fuso Horário Local no Fim do Dia) ---
+# --- Callback para Gerar e Baixar PDF dos Dados Históricos ---
 @app.callback(
     [Output('download-pdf-especifico', 'data'),
      Output('alert-pdf-error', 'is_open', allow_duplicate=True)],
@@ -591,7 +589,6 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         # 3. Configurações e Status
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         status_atual_dict = status_json
-        status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
         risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
@@ -637,6 +634,7 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         )
 
         # 8. Chamar a função de gerar PDF
+        # NOTE: A lógica de exportação de imagem foi movida para o gerador_pdf.py
         pdf_buffer = gerador_pdf.criar_relatorio_em_memoria(
             df_filtrado, fig_chuva_pdf, fig_umidade_pdf, status_texto, status_cor
         )
@@ -646,139 +644,3 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         # 9. Download
         pdf_output = io.BytesIO(pdf_buffer)
         return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf"), False
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO no Callback PDF:")
-        traceback.print_exc()
-        return dash.no_update, True
-
-
-# --- FIM DA ALTERAÇÃO ---
-
-
-# --- INÍCIO DA ALTERAÇÃO v5 (Fuso Horário Local no Fim do Dia) ---
-@app.callback(
-    [Output('download-excel-especifico', 'data'),
-     Output('alert-pdf-error', 'is_open', allow_duplicate=True)],  # Reutiliza o alerta de erro
-    Input('btn-excel-especifico', 'n_clicks'),
-    [
-        State('pdf-date-picker', 'start_date'),
-        State('pdf-date-picker', 'end_date'),
-        State('store-id-ponto-ativo', 'data')
-    ],
-    prevent_initial_call=True
-)
-def generate_data_excel(n_clicks, start_date, end_date, id_ponto):
-    if n_clicks is None or not id_ponto:
-        return dash.no_update, False
-
-    try:
-        # 1. Preparar datas
-        start_dt = pd.to_datetime(start_date).tz_localize('UTC')
-
-        # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
-        end_dt_naive = pd.to_datetime(end_date)
-        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
-        end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        end_dt = end_dt_local_final.tz_convert('UTC')
-        # --- FIM DA CORREÇÃO ---
-
-        # 2. Ler dados DIRETAMENTE DO SQLITE
-        df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
-
-        if df_filtrado.empty:
-            print("LOG EXCEL: Sem dados no período selecionado (SQLite).")
-            return dash.no_update, True  # Abre o alerta de erro
-
-        # 3. Limpar dados nulos
-        df_filtrado = df_filtrado.dropna(subset=['timestamp'])
-        if df_filtrado.empty:
-            print("LOG EXCEL: Dados lidos, mas todos tinham timestamp nulo. Nenhum dado para exportar.")
-            return dash.no_update, True
-
-        # 4. Lógica de Fuso Horário (para Excel)
-        if df_filtrado['timestamp'].dt.tz is None:
-            print("LOG EXCEL: Detectados timestamps 'naive'. Assumindo UTC.")
-            try:
-                df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize('UTC')
-            except Exception as e_tz:
-                print(f"LOG EXCEL: Falha ao localizar timestamps 'naive' (pode ser misto): {e_tz}")
-                df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC',
-                                                                                                   ambiguous='infer',
-                                                                                                   nonexistent='shift_forward')
-
-        df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
-        df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize(None)
-
-        # 5. Preparar o ficheiro Excel em memória
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_filtrado.to_excel(writer, index=False, sheet_name='Dados Monitoramento')
-        excel_data = output.getvalue()
-
-        # 6. Configurações de Nome e Download
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
-        nome_arquivo = f"Relatorio_Excel_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-        print(f"LOG EXCEL: Excel gerado com sucesso (do SQLite). Arquivo: {nome_arquivo}")
-
-        # 7. Enviar o ficheiro
-        return dcc.send_bytes(excel_data, nome_arquivo), False
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO no Callback Excel:")
-        traceback.print_exc()
-        return dash.no_update, True
-
-
-# --- FIM DA ALTERAÇÃO ---
-
-
-# Callback para Gerar e Baixar PDF dos Logs de Eventos
-@app.callback(
-    Output('download-pdf-logs', 'data'),
-    Input('btn-pdf-logs', 'n_clicks'),
-    [
-        State('store-logs-sessao', 'data'),
-        State('store-id-ponto-ativo', 'data')
-    ],
-    prevent_initial_call=True
-)
-def generate_logs_pdf(n_clicks, logs_json, id_ponto):
-    if n_clicks is None or not id_ponto or not logs_json:
-        return dash.no_update
-
-    try:
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
-
-        if isinstance(logs_json, str):
-            logs_list = logs_json.split('\n')
-        elif isinstance(logs_json, list):
-            logs_list = logs_json
-        else:
-            logs_list = json.loads(logs_json)
-
-        logs_list = [log.strip() for log in logs_list if log.strip()]
-
-        # --- INÍCIO DA ALTERAÇÃO (Filtro de Logs) ---
-        # 1. Filtra por ponto
-        logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
-        # 2. Esconde "API: Sucesso"
-        logs_to_pdf = [
-            log for log in logs_ponto_ou_geral
-            if "API: Sucesso" not in log
-        ]
-        # --- FIM DA ALTERAÇÃO ---
-
-        if not logs_to_pdf:
-            return dash.no_update
-
-        pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(id_ponto, logs_to_pdf)
-        nome_arquivo = f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-
-        pdf_output = io.BytesIO(pdf_buffer)
-        return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf")
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO no Callback PDF de Logs:")
-        traceback.print_exc()
-        return dash.no_update
