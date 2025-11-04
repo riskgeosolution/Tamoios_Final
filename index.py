@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v8: Restaurando o app.run() para testes locais + todas as correções)
+# index.py (CORRIGIDO v9: Adicionado o callback do Toggler)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -41,6 +41,7 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
+# (Esta seção não foi alterada)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -168,6 +169,7 @@ def background_task_wrapper():
 
 # ==============================================================================
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
+# (Esta seção não foi alterada)
 # ==============================================================================
 
 app.layout = html.Div([
@@ -187,7 +189,8 @@ app.layout = html.Div([
 
 
 # ==============================================================================
-# --- CALLBACKS (Mantidos) ---
+# --- CALLBACKS (com uma nova adição) ---
+# (As seções 1-6 não foram alteradas)
 # ==============================================================================
 
 @app.callback(
@@ -278,8 +281,25 @@ def update_data_and_logs_from_disk(n_intervals):
     return dados_json_output, status_atual, logs
 
 
+# --- INÍCIO DA ALTERAÇÃO (Novo Callback) ---
+
+# 7. Callback para o menu "hamburger" (Navbar)
+# Este é o callback que estava faltando, que faz o botão funcionar.
+@app.callback(
+    Output("navbar-collapse", "is_open"),
+    [Input("navbar-toggler", "n_clicks")],
+    [State("navbar-collapse", "is_open")],
+)
+def toggle_navbar_collapse(n, is_open):
+    if n:
+        return not is_open
+    return is_open
+
+# --- FIM DA ALTERAÇÃO ---
+
+
 # ==============================================================================
-# --- SEÇÃO DE EXECUÇÃO LOCAL (COM O COMANDO app.run() NO FINAL) ---
+# --- SEÇÃO DE EXECUÇÃO LOCAL (Não alterada) ---
 # ==============================================================================
 
 # 1. Configura os caminhos ANTES de iniciar a thread

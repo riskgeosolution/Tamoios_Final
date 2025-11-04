@@ -1,4 +1,4 @@
-# app.py (FINAL: Apenas define o app para ser usado pelo index.py)
+# app.py (CORRIGIDO: Título da aba do navegador alterado)
 
 import dash
 import dash_bootstrap_components as dbc
@@ -33,7 +33,10 @@ app = dash.Dash(__name__,
                 suppress_callback_exceptions=True
 )
 
-app.title = "Monitoramento Geotécnico"
+# --- INÍCIO DA ALTERAÇÃO DO TÍTULO ---
+app.title = "Monitoramento Geoambiental" # <-- ALTERADO DE "Geotécnico"
+# --- FIM DA ALTERAÇÃO DO TÍTULO ---
+
 server = app.server # <-- O Gunicorn procura esta variável 'server'
 
 # Constantes globais que outras páginas podem precisar

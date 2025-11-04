@@ -55,3 +55,56 @@ h1, h2, h3, h4, h5, h6 { color: #343a40; margin-bottom: 0.5rem; }
     color: #000 !important;
 }
 /* --- FIM DA NOVA CORREÇÃO --- */
+
+
+/* --- INÍCIO: NOVA REGRA DE RESPONSIVIDADE (Redimensiona, não empilha) --- */
+
+@media (max-width: 768px) {
+
+    /* 1. Reduz a largura dos cards laterais */
+    .map-summary-card {
+        width: 130px !important; /* Largura reduzida para caber no celular */
+        padding: 0.25rem !important;
+        max-height: calc(90vh - 4rem) !important;
+    }
+
+    /* 2. Reduz o padding e margens internas */
+    .map-summary-card .km-summary-block {
+        padding: 0.25rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    /* 3. Reduz os gauges (medidores) */
+    .gauge-vertical-container {
+        width: 45px !important;
+        height: 70px !important;
+    }
+
+    /* 4. Reduz a fonte do número do gauge */
+    .gauge-label {
+        font-size: 1.8em !important;
+        line-height: 1 !important;
+    }
+    .gauge-label .small {
+         font-size: 0.6em !important;
+    }
+
+    /* 5. Reduz as fontes dos títulos e labels */
+    .map-summary-card .card-header,
+    .map-summary-card h6 {
+        font-size: 0.75rem !important;
+        margin-bottom: 0.25rem !important;
+    }
+
+    .map-summary-card .small {
+        font-size: 0.7rem !important;
+    }
+
+    .badge-black-text {
+        font-size: 0.7rem !important;
+        padding-left: 0.25rem !important;
+        padding-right: 0.25rem !important;
+    }
+}
+
+/* --- FIM: NOVA REGRA DE RESPONSIVIDADE --- */
