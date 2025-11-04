@@ -1,179 +1,171 @@
-# gerador_pdf.py (CORRIGIDO v4: Novo método de exportação para evitar o Kaleido)
+# gerador_pdf.py (CORRIGIDO V4: Suporte Nativo a Matplotlib)
 
 import io
-from fpdf import FPDF
-import plotly.io as pio
-import pandas as pd
+from fpdf import FPDF, Align
 from datetime import datetime
-import traceback
-import tempfile
-import os
-from io import BytesIO
-
-# Importa as constantes dos pontos para usar nos títulos
-try:
-    from config import PONTOS_DE_ANALISE
-except ImportError:
-    PONTOS_DE_ANALISE = {}
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure  # Importa o tipo Figure
+import json
 
 
-class PDF(FPDF):
-    """ Classe FPDF customizada com cabeçalho e rodapé """
-
-    def header(self):
-        self.set_font("Arial", "B", 12)
-        self.cell(0, 10, "Relatório de Monitoramento Geotécnico", 0, 1, "C")
-        self.set_font("Arial", "", 8)
-        self.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", 0, 1, "C")
-        self.ln(10)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Arial", "I", 8)
-        self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "C")
-
-
-def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual, cor_status):
+def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor):
     """
-    Gera um relatório PDF de Dados (Gráficos e Tabela).
-    NOTA: Usa arquivos temporários para contornar a limitação de exportação de imagem do Render.
+    Cria um relatório PDF em buffer de memória.
+    Recebe figuras do Matplotlib (fig_chuva_mp e fig_umidade_mp).
     """
-    pdf = PDF()
+
+    # --- 1. Inicializa o PDF ---
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    temp_file_chuva = None
-    temp_file_umidade = None
+    pdf.set_font("Helvetica", size=10)
 
-    if 'id_ponto' in df_periodo.columns and not df_periodo.empty:
-        id_ponto = df_periodo['id_ponto'].iloc[0]
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": id_ponto})
-        nome_ponto = config['nome']
-    else:
-        nome_ponto = "Dados Consolidados"
+    # --- 2. Cabeçalho e Metadados ---
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, f"Relatório de Monitoramento - {df_dados.iloc[0]['id_ponto']}", ln=True, align="C")
 
-    # 1. Adiciona Status
-    pdf.set_font("Arial", "B", 14)
-    if cor_status == "danger":
-        pdf.set_text_color(220, 53, 69)
-    elif cor_status == "warning":
-        pdf.set_text_color(255, 193, 7)
-    elif cor_status == "success":
-        pdf.set_text_color(40, 167, 69)
-    else:
-        pdf.set_text_color(108, 117, 125)
-
-    pdf.cell(0, 10, f"Estação: {nome_ponto}", 0, 1, "L")
-    pdf.cell(0, 10, f"Status do Período: {status_atual}", 0, 1, "L")
-    pdf.set_text_color(0, 0, 0)
+    # Datas do relatório
+    data_inicio_local = df_dados['timestamp_local'].min().strftime('%d/%m/%Y %H:%M')
+    data_fim_local = df_dados['timestamp_local'].max().strftime('%d/%m/%Y %H:%M')
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 5, f"Período: {data_inicio_local} a {data_fim_local}", ln=True, align="C")
+    pdf.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True, align="C")
     pdf.ln(5)
 
-    # 2. Adiciona Gráficos (Método mais seguro em memória)
-    try:
-        if fig_chuva and fig_umidade:
+    # --- 3. Status Atual ---
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(pdf.w / 2 - pdf.l_margin, 8, "Status Geral do Período:", border=1, align="L")
 
-            # --- Exportação Segura para Arquivo Temporário ---
-            # O Plotly tenta usar o Kaleido (mas deve falhar). Se falhar, a exceção é capturada,
-            # e o PDF continua com o aviso correto.
+    # Mapeamento de cor (usando cores básicas para FPDF)
+    cor_borda = 0
+    cor_fundo = 200  # Cinza claro padrão
+    if status_cor == 'success':
+        cor_fundo = (180, 255, 180)  # Verde
+    elif status_cor == 'warning':
+        cor_fundo = (255, 255, 150)  # Amarelo
+    elif status_cor == 'danger':
+        cor_fundo = (255, 180, 180)  # Vermelho
 
-            # Gráfico 1: Chuva
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                temp_file_chuva = tmp.name
-                pio.write_image(fig_chuva, temp_file_chuva, format="png", width=800, height=350, engine="auto")
+    pdf.set_fill_color(*cor_fundo)
+    pdf.cell(0, 8, status_texto, border=1, ln=True, align="C", fill=True)
+    pdf.ln(5)
 
-            # Gráfico 2: Umidade
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                temp_file_umidade = tmp.name
-                pio.write_image(fig_umidade, temp_file_umidade, format="png", width=800, height=350, engine="auto")
+    # --- 4. Gráficos (Processamento Matplotlib) ---
 
-            # --- Adicionar ao PDF ---
-            pdf.set_font("Arial", "B", 12)
+    def _add_matplotlib_fig(fig, title):
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 5, title, ln=True, align="L")
+        try:
+            # Salva a figura Matplotlib em memória como PNG
+            img_bytes = io.BytesIO()
+            fig.savefig(img_bytes, format="png", bbox_inches="tight")
+            img_bytes.seek(0)
+            plt.close(fig)  # Fecha a figura Matplotlib para liberar memória
 
-            pdf.cell(0, 10, "Gráfico de Chuva Acumulada (72h)", 0, 1, "L")
-            pdf.image(temp_file_chuva, x=pdf.get_x() + 10, y=pdf.get_y(), w=180)
-            pdf.ln(95)
-
-            pdf.cell(0, 10, "Gráfico de Variação da Umidade Solo", 0, 1, "L")
-            pdf.image(temp_file_umidade, x=pdf.get_x() + 10, y=pdf.get_y(), w=180)
-            pdf.ln(95)
-
-        else:
-            pdf.set_font("Arial", "B", 12)
-            pdf.cell(0, 10, f"Avviso: Não foi possível gerar gráficos. (Sem dados)", 0, 1, "L")
+            # Adiciona a imagem ao PDF
+            pdf.image(img_bytes, x=pdf.l_margin, y=None, w=pdf.w - 2 * pdf.l_margin)
             pdf.ln(5)
+            return True
+        except Exception as e:
+            pdf.set_font("Helvetica", "I", 10)
+            pdf.cell(0, 5, f"AVISO: Não foi possível gerar o gráfico de {title}. Erro: {e}", ln=True, align="C")
+            pdf.ln(5)
+            return False
 
-    except Exception as e:
-        # Se a exportação falhar (ValueError, Missing Dependency), insere o aviso no PDF
-        print(f"ERRO DE EXPORTAÇÃO PLOTLY-PDF: {e}")
-        traceback.print_exc()
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 10, f"Avviso: Não foi possível gerar gráficos. (Dependência Gráfica Ausente)", 0, 1, "L")
-        pdf.ln(5)
+    # Adiciona Gráfico de Chuva
+    _add_matplotlib_fig(fig_chuva_mp, "Pluviometria e Acumulado (72h)")
 
-    finally:
-        # 3. Limpeza dos arquivos temporários (muito importante!)
-        # O Render não vai falhar se a imagem for deletada, mesmo que não tenha sido criada
-        if temp_file_chuva and os.path.exists(temp_file_chuva):
-            os.remove(temp_file_chuva)
-        if temp_file_umidade and os.path.exists(temp_file_umidade):
-            os.remove(temp_file_umidade)
+    # Adiciona Gráfico de Umidade
+    _add_matplotlib_fig(fig_umidade_mp, "Umidade do Solo")
 
-    # 4. Adiciona Tabela de Dados (o resto do PDF)
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, "Dados Brutos do Período Selecionado", 0, 1, "L")
+    # --- 5. Tabela de Dados (Últimas 5 leituras) ---
     pdf.ln(5)
-    # [Lógica da Tabela de Dados mantida]
-    df_tabela = df_periodo.copy()
-    if 'timestamp' in df_tabela.columns:
-        df_tabela['timestamp'] = pd.to_datetime(df_tabela['timestamp']).dt.tz_convert('America/Sao_Paulo').dt.strftime(
-            '%d/%m %H:%M')
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, "Amostra dos Últimos Registros", ln=True, align="L")
 
-    cols_display = ['timestamp', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
-    df_tabela = df_tabela[[col for col in cols_display if col in df_tabela.columns]].fillna('-')
+    df_ultimos = df_dados[
+        ['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].tail(5)
 
-    pdf.set_font("Arial", "", 8)
-    col_width = pdf.w / (len(df_tabela.columns) + 1)
+    # Configurações da Tabela
+    col_widths = [45, 35, 30, 30, 30]  # Larguras das colunas
+    headers = ["Data/Hora (Local)", "Chuva (mm/h)", "Umidade 1m (%)", "Umidade 2m (%)", "Umidade 3m (%)"]
 
-    for col in df_tabela.columns: pdf.cell(col_width * 1.2, 5, col, 1)
+    pdf.set_font("Helvetica", "B", 9)
+    # Desenha o cabeçalho
+    for w, h in zip(col_widths, headers):
+        pdf.cell(w, 7, h, border=1, align="C", fill=True)
     pdf.ln()
 
-    for index, row in df_tabela.iterrows():
-        if pdf.get_y() > (pdf.h - 30):
-            pdf.add_page()
-            pdf.set_font("Arial", "", 8)
-            for col in df_tabela.columns: pdf.cell(col_width * 1.2, 5, col, 1)
-            pdf.ln()
-        for col in df_tabela.columns: pdf.cell(col_width * 1.2, 5, str(row[col]), 1)
+    pdf.set_font("Helvetica", "", 8)
+    # Desenha as linhas
+    for _, row in df_ultimos.iterrows():
+        pdf.cell(col_widths[0], 6, row['timestamp_local'].strftime('%d/%m/%Y %H:%M:%S'), border=1, align="C")
+        pdf.cell(col_widths[1], 6, f"{row['chuva_mm']:.1f}", border=1, align="C")
+        pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}", border=1, align="C")
+        pdf.cell(col_widths[3], 6, f"{row['umidade_2m_perc']:.1f}", border=1, align="C")
+        pdf.cell(col_widths[4], 6, f"{row['umidade_3m_perc']:.1f}", border=1, align="C")
         pdf.ln()
 
-    return pdf.output(dest='S')
+    # --- 6. Finalização e Retorno ---
+
+    # Retorna o buffer de bytes do PDF
+    buffer_output = pdf.output(dest='S')
+    return buffer_output
 
 
-def criar_relatorio_logs_em_memoria(nome_ponto, logs_do_ponto):
+def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     """
-    Gera um relatório PDF simples contendo uma lista de logs.
+    Cria um relatório PDF dos logs de eventos em buffer de memória.
     """
-    # [Lógica para logs mantida]
-    pdf = PDF()
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, f"Relatório de Eventos (Logs) - {nome_ponto}", 0, 1, "L")
+    pdf.set_font("Helvetica", size=10)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, f"Histórico de Eventos - {nome_ponto}", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 5, f"Período: Últimos 7 dias (ou total dos logs)", ln=True, align="C")
+    pdf.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True, align="C")
     pdf.ln(5)
-    pdf.set_font("Courier", "", 9)
-    logs_recentes_primeiro = reversed(logs_do_ponto)
-    for log_msg in logs_recentes_primeiro:
-        if pdf.get_y() > (pdf.h - 20):
-            pdf.add_page()
-            pdf.set_font("Courier", "", 9)
-        if "ERRO" in log_msg:
-            cor = "red"
-        elif "AVISO" in log_msg:
-            cor = "#E69B00"
-        elif "MUDANÇA" in log_msg:
-            cor = "blue"
-        else:
-            cor = "black"
-        pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, log_msg, 0, 'L')
-        pdf.ln(2)
-    pdf.set_text_color(0, 0, 0)
-    return pdf.output(dest='S')
+
+    pdf.set_font("Courier", size=8)  # Fonte monoespaçada para logs
+
+    # Inverte a ordem para os mais recentes estarem no topo do PDF
+    for log_str in reversed(logs_filtrados):
+        try:
+            parts = log_str.split('|')
+            timestamp_str_utc_iso = parts[0].strip()
+            ponto_str = parts[1].strip()
+            msg_str = "|".join(parts[2:]).strip()
+
+            try:
+                dt_utc = pd.to_datetime(timestamp_str_utc_iso).tz_localize('UTC')
+                dt_local = dt_utc.tz_convert('America/Sao_Paulo')
+                timestamp_formatado = dt_local.strftime('%d/%m/%Y %H:%M:%S')
+            except Exception:
+                timestamp_formatado = timestamp_str_utc_iso.split('+')[0].replace('T', ' ')
+
+            # Formatação de cor básica no texto
+            cor = (0, 0, 0)  # Preto padrão
+            if "ERRO" in msg_str:
+                cor = (200, 0, 0)  # Vermelho
+            elif "AVISO" in msg_str:
+                cor = (200, 150, 0)  # Laranja
+            elif "MUDANÇA" in msg_str:
+                cor = (0, 0, 200)  # Azul
+
+            pdf.set_text_color(*cor)
+            linha = f"[{timestamp_formatado}] {ponto_str}: {msg_str}"
+            pdf.multi_cell(0, 4, linha)
+
+        except Exception:
+            pdf.set_text_color(0, 0, 0)
+            pdf.multi_cell(0, 4, log_str)
+
+    pdf.set_text_color(0, 0, 0)  # Volta para o preto
+
+    # Retorna o buffer de bytes do PDF
+    buffer_output = pdf.output(dest='S')
+    return buffer_output
