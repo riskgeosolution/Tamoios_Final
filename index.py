@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v3: Lógica do Worker iniciada no nível superior)
+# index.py (CORRIGIDO v4: Importando 'datetime')
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -9,7 +9,8 @@ import os
 import json
 from dotenv import load_dotenv
 import time
-from threading import Thread  # <-- IMPORTANTE
+from threading import Thread
+import datetime  # <-- ESTA É A LINHA QUE FALTAVA
 
 # Carrega as variáveis do .env file
 load_dotenv()
@@ -156,7 +157,7 @@ def background_task_wrapper():
 
         if proximo_minuto_base >= 60:
             proxima_hora_utc = agora_utc + datetime.timedelta(hours=1)
-            proximo_minuto_base = 0
+            proxima_minuto_base = 0
 
         proxima_execucao_base_utc = proxima_hora_utc.replace(
             minute=proximo_minuto_base,
@@ -222,7 +223,6 @@ def display_page_content(pathname, session_data):
     if not session_data.get('logged_in', False):
         return html.Div()
 
-    # Roteador (movido de get_content_page)
     if pathname.startswith('/ponto/'):
         return specific_dash.get_layout()
     elif pathname == '/dashboard-geral':
@@ -289,7 +289,6 @@ def toggle_interval_update(session_data):
     Input('intervalo-atualizacao-dados', 'n_intervals')
 )
 def update_data_and_logs_from_disk(n_intervals):
-    # O painel apenas lê o que o worker_thread salvou
     df_completo, status_atual, logs = data_source.get_all_data_from_disk()
     dados_json_output = df_completo.to_json(date_format='iso', orient='split')
     return dados_json_output, status_atual, logs
