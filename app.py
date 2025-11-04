@@ -1,4 +1,4 @@
-# app.py (CORRIGIDO: Força o "Modo Desktop" com largura fixa)
+# app.py (CORRIGIDO: Força o "Modo Desktop" com largura fixa e zoom-out)
 
 import dash
 import dash_bootstrap_components as dbc
@@ -18,11 +18,11 @@ MEU_CSS_LOCAL = [
     "/assets/style.css"
 ]
 
-# --- INÍCIO DA ALTERAÇÃO (Força "Modo Desktop") ---
-# Em vez de 'width=device-width', definimos uma largura fixa de 1200px.
-# Isso força o navegador do celular a carregar o site com zoom out.
+# --- INÍCIO DA ALTERAÇÃO (Força "Modo Desktop" + Zoom Out) ---
+# width=1200: Força o layout de desktop.
+# initial-scale=0.1: Força o navegador a carregar 100% "tirado o zoom".
 META_TAGS = [
-    {"name": "viewport", "content": "width=1200"}
+    {"name": "viewport", "content": "width=1200, initial-scale=0.1"}
 ]
 # --- FIM DA ALTERAÇÃO ---
 
