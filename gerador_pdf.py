@@ -1,4 +1,4 @@
-# gerador_pdf.py (CORRIGIDO V4: Suporte Nativo a Matplotlib)
+# gerador_pdf.py (CORRIGIDO V5: Suporte Matplotlib e Tratamento de Nulos na Tabela)
 
 import io
 from fpdf import FPDF, Align
@@ -23,7 +23,9 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
 
     # --- 2. Cabeçalho e Metadados ---
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, f"Relatório de Monitoramento - {df_dados.iloc[0]['id_ponto']}", ln=True, align="C")
+    # Garante que 'id_ponto' não esteja vazio antes de tentar acessar
+    id_ponto_rel = df_dados.iloc[0]['id_ponto'] if not df_dados.empty else "Monitoramento"
+    pdf.cell(0, 10, f"Relatório de Monitoramento - {id_ponto_rel}", ln=True, align="C")
 
     # Datas do relatório
     data_inicio_local = df_dados['timestamp_local'].min().strftime('%d/%m/%Y %H:%M')
@@ -64,6 +66,7 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
             plt.close(fig)  # Fecha a figura Matplotlib para liberar memória
 
             # Adiciona a imagem ao PDF
+            # A largura é calculada para preencher a página (largura total - 2 * margem)
             pdf.image(img_bytes, x=pdf.l_margin, y=None, w=pdf.w - 2 * pdf.l_margin)
             pdf.ln(5)
             return True
@@ -84,8 +87,15 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 10, "Amostra dos Últimos Registros", ln=True, align="L")
 
+    # NOVAS CORREÇÕES CRÍTICAS: Prepara e trata Nulos para a Tabela
+
+    # 1. Converte o timestamp para string antes de fatiar
+    df_dados.loc[:, 'timestamp_local_str'] = df_dados['timestamp_local'].apply(
+        lambda x: x.strftime('%d/%m/%Y %H:%M:%S') if pd.notna(x) else '-')
+
+    # 2. Seleciona as últimas 5 linhas
     df_ultimos = df_dados[
-        ['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].tail(5)
+        ['timestamp_local_str', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].tail(5).copy()
 
     # Configurações da Tabela
     col_widths = [45, 35, 30, 30, 30]  # Larguras das colunas
@@ -98,13 +108,26 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
     pdf.ln()
 
     pdf.set_font("Helvetica", "", 8)
+
+    # Função helper para formatar, tratando None ou NaN
+    def format_cell(value):
+        if pd.isna(value) or value is None:
+            return '-'
+        try:
+            return f"{value:.1f}"
+        except:
+            # Caso o valor não seja numérico por algum motivo
+            return str(value)
+
     # Desenha as linhas
     for _, row in df_ultimos.iterrows():
-        pdf.cell(col_widths[0], 6, row['timestamp_local'].strftime('%d/%m/%Y %H:%M:%S'), border=1, align="C")
-        pdf.cell(col_widths[1], 6, f"{row['chuva_mm']:.1f}", border=1, align="C")
-        pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}", border=1, align="C")
-        pdf.cell(col_widths[3], 6, f"{row['umidade_2m_perc']:.1f}", border=1, align="C")
-        pdf.cell(col_widths[4], 6, f"{row['umidade_3m_perc']:.1f}", border=1, align="C")
+        # Usa a coluna de string já formatada
+        pdf.cell(col_widths[0], 6, row['timestamp_local_str'], border=1, align="C")
+        # Usa a função helper para garantir a formatação ou o '-'
+        pdf.cell(col_widths[1], 6, format_cell(row['chuva_mm']), border=1, align="C")
+        pdf.cell(col_widths[2], 6, format_cell(row['umidade_1m_perc']), border=1, align="C")
+        pdf.cell(col_widths[3], 6, format_cell(row['umidade_2m_perc']), border=1, align="C")
+        pdf.cell(col_widths[4], 6, format_cell(row['umidade_3m_perc']), border=1, align="C")
         pdf.ln()
 
     # --- 6. Finalização e Retorno ---
