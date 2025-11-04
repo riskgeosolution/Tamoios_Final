@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v5: Corrigindo ValueError: minute must be in 0..59)
+# index.py (CORRIGIDO v8: Restaurando o app.run() para testes locais + todas as correções)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -10,7 +10,7 @@ import json
 from dotenv import load_dotenv
 import time
 from threading import Thread
-import datetime  # Importado corretamente
+import datetime
 
 # Carrega as variáveis do .env file
 load_dotenv()
@@ -44,7 +44,6 @@ SENHA_ADMIN = 'admin456'
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
-    """ (Copiado do worker.py) Compara status e loga mudanças. """
     if not status_novos:
         print("[Worker Thread] Nenhum status novo recebido para verificação.")
         return status_antigos
@@ -66,14 +65,12 @@ def worker_verificar_alertas(status_novos, status_antigos):
             except Exception as e:
                 print(f"Erro ao gerar log de mudança de status: {e}")
 
-            # (alertas.enviar_alerta() iria aqui)
             status_atualizado[id_ponto] = status_novo
 
     return status_atualizado
 
 
 def worker_main_loop():
-    """ (Copiado do worker.py) O loop principal de coleta. """
     inicio_ciclo = time.time()
     try:
         historico_df, status_antigos_do_disco, logs = data_source.get_all_data_from_disk()
@@ -148,27 +145,16 @@ def background_task_wrapper():
         tempo_execucao = time.time() - inicio_total
         agora_utc = datetime.datetime.now(datetime.timezone.utc)
 
-        # --- INÍCIO DA CORREÇÃO DE VALUER ERROR ---
-        # 1. Calcula o tempo total em segundos até o próximo bloco (XX:00, XX:15, etc.)
-        # O '//' garante que a divisão seja inteira. O '% 15' garante que o tempo restante seja calculado corretamente.
         minutos_restantes = INTERVALO_EM_MINUTOS - (agora_utc.minute % INTERVALO_EM_MINUTOS)
-
-        # 2. Calcula a próxima hora base (Ex: se agora é 14:29, minutos_restantes é 1, próximo bloco é 14:30)
         proxima_execucao_base_utc = agora_utc + datetime.timedelta(minutes=minutos_restantes)
 
-        # 3. Força os segundos e microsegundos a zero (Ex: 14:30:00)
         proxima_execucao_base_utc = proxima_execucao_base_utc.replace(
             second=0,
             microsecond=0
         )
 
-        # 4. Adiciona a carência (o 1 minuto de folga)
         proxima_execucao_com_carencia_utc = proxima_execucao_base_utc + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
-
-        # 5. Calcula o tempo de espera real
         tempo_para_dormir_seg = (proxima_execucao_com_carencia_utc - agora_utc).total_seconds()
-
-        # --- FIM DA CORREÇÃO DE VALUER ERROR ---
 
         if tempo_para_dormir_seg < 0:
             print(f"AVISO (Thread): O ciclo demorou {tempo_execucao:.1f}s e perdeu a janela. Rodando novamente...")
@@ -201,7 +187,7 @@ app.layout = html.Div([
 
 
 # ==============================================================================
-# --- CALLBACKS DE AUTENTICAÇÃO E ROTEAMENTO ---
+# --- CALLBACKS (Mantidos) ---
 # ==============================================================================
 
 @app.callback(
@@ -271,10 +257,6 @@ def logout_callback(n_clicks):
     return {'logged_in': False, 'user_type': 'guest'}, '/'
 
 
-# ==============================================================================
-# --- CALLBACKS DE DADOS (Lê o DB/Disco) ---
-# ==============================================================================
-
 @app.callback(
     Output('intervalo-atualizacao-dados', 'disabled'),
     Input('session-store', 'data')
@@ -297,7 +279,7 @@ def update_data_and_logs_from_disk(n_intervals):
 
 
 # ==============================================================================
-# --- INICIA O WORKER THREAD ---
+# --- SEÇÃO DE EXECUÇÃO LOCAL (COM O COMANDO app.run() NO FINAL) ---
 # ==============================================================================
 
 # 1. Configura os caminhos ANTES de iniciar a thread
@@ -307,3 +289,15 @@ data_source.setup_disk_paths()
 print("Iniciando o worker (coletor de dados) em um thread separado...")
 worker_thread = Thread(target=background_task_wrapper, daemon=True)
 worker_thread.start()
+
+# 3. O bloco if __name__ == '__main__': é mantido APENAS para teste local
+if __name__ == '__main__':
+    host = '127.0.0.1'
+    port = 8050
+    print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
+
+    try:
+        # NOTE: O debug=True é importante para que o servidor reinicie as threads corretamente
+        app.run(debug=True, host=host, port=port)
+    except Exception as e:
+        print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")
