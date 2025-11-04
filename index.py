@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v4: Importando 'datetime')
+# index.py (CORRIGIDO v5: Corrigindo ValueError: minute must be in 0..59)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -10,13 +10,12 @@ import json
 from dotenv import load_dotenv
 import time
 from threading import Thread
-import datetime  # <-- ESTA É A LINHA QUE FALTAVA
+import datetime  # Importado corretamente
 
 # Carrega as variáveis do .env file
 load_dotenv()
 
 # --- IMPORTAÇÃO CRÍTICA DO APP ---
-# Agora importamos o 'app' e o 'server' do app.py
 from app import app, server
 # --- FIM DA IMPORTAÇÃO CRÍTICA ---
 
@@ -42,8 +41,6 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
-# (As funções worker_verificar_alertas, worker_main_loop, e
-# background_task_wrapper são mantidas exatamente como antes)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -134,8 +131,7 @@ def worker_main_loop():
 
 def background_task_wrapper():
     """
-    (Copiado do worker.py) O loop "inteligente" que sincroniza
-    com o relógio UTC e roda o main_loop.
+    O loop "inteligente" que sincroniza com o relógio UTC e roda o main_loop.
     """
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
@@ -152,20 +148,27 @@ def background_task_wrapper():
         tempo_execucao = time.time() - inicio_total
         agora_utc = datetime.datetime.now(datetime.timezone.utc)
 
-        proximo_minuto_base = (agora_utc.minute // INTERVALO_EM_MINUTOS + 1) * INTERVALO_EM_MINUTOS
-        proxima_hora_utc = agora_utc
+        # --- INÍCIO DA CORREÇÃO DE VALUER ERROR ---
+        # 1. Calcula o tempo total em segundos até o próximo bloco (XX:00, XX:15, etc.)
+        # O '//' garante que a divisão seja inteira. O '% 15' garante que o tempo restante seja calculado corretamente.
+        minutos_restantes = INTERVALO_EM_MINUTOS - (agora_utc.minute % INTERVALO_EM_MINUTOS)
 
-        if proximo_minuto_base >= 60:
-            proxima_hora_utc = agora_utc + datetime.timedelta(hours=1)
-            proxima_minuto_base = 0
+        # 2. Calcula a próxima hora base (Ex: se agora é 14:29, minutos_restantes é 1, próximo bloco é 14:30)
+        proxima_execucao_base_utc = agora_utc + datetime.timedelta(minutes=minutos_restantes)
 
-        proxima_execucao_base_utc = proxima_hora_utc.replace(
-            minute=proximo_minuto_base,
+        # 3. Força os segundos e microsegundos a zero (Ex: 14:30:00)
+        proxima_execucao_base_utc = proxima_execucao_base_utc.replace(
             second=0,
             microsecond=0
         )
+
+        # 4. Adiciona a carência (o 1 minuto de folga)
         proxima_execucao_com_carencia_utc = proxima_execucao_base_utc + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
+
+        # 5. Calcula o tempo de espera real
         tempo_para_dormir_seg = (proxima_execucao_com_carencia_utc - agora_utc).total_seconds()
+
+        # --- FIM DA CORREÇÃO DE VALUER ERROR ---
 
         if tempo_para_dormir_seg < 0:
             print(f"AVISO (Thread): O ciclo demorou {tempo_execucao:.1f}s e perdeu a janela. Rodando novamente...")
@@ -181,7 +184,6 @@ def background_task_wrapper():
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
 # ==============================================================================
 
-# ESTA É A LINHA QUE CORRIGE O ERRO 'NoLayoutException'
 app.layout = html.Div([
     dcc.Store(id='session-store', data={'logged_in': False, 'user_type': 'guest'}, storage_type='session'),
     dcc.Store(id='store-dados-sessao', storage_type='session'),
@@ -190,7 +192,7 @@ app.layout = html.Div([
     dcc.Location(id='url-raiz', refresh=False),
     dcc.Interval(
         id='intervalo-atualizacao-dados',
-        interval=10 * 1000,  # Continua 10s (o painel)
+        interval=10 * 1000,
         n_intervals=0,
         disabled=True
     ),
