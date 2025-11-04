@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v2: Arquitetura de 1 Serviço com Thread)
+# index.py (CORRIGIDO v3: Lógica do Worker iniciada no nível superior)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -15,6 +15,7 @@ from threading import Thread  # <-- IMPORTANTE
 load_dotenv()
 
 # --- IMPORTAÇÃO CRÍTICA DO APP ---
+# Agora importamos o 'app' e o 'server' do app.py
 from app import app, server
 # --- FIM DA IMPORTAÇÃO CRÍTICA ---
 
@@ -25,7 +26,6 @@ import data_source
 import config
 
 # --- IMPORTAÇÕES DO WORKER ---
-# (Trazendo a lógica do worker.py para dentro do index.py)
 import processamento
 import alertas
 import traceback
@@ -41,6 +41,8 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
+# (As funções worker_verificar_alertas, worker_main_loop, e
+# background_task_wrapper são mantidas exatamente como antes)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -177,6 +179,8 @@ def background_task_wrapper():
 # ==============================================================================
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
 # ==============================================================================
+
+# ESTA É A LINHA QUE CORRIGE O ERRO 'NoLayoutException'
 app.layout = html.Div([
     dcc.Store(id='session-store', data={'logged_in': False, 'user_type': 'guest'}, storage_type='session'),
     dcc.Store(id='store-dados-sessao', storage_type='session'),
@@ -292,27 +296,18 @@ def update_data_and_logs_from_disk(n_intervals):
 
 
 # ==============================================================================
-# --- SEÇÃO DE EXECUÇÃO LOCAL ---
+# --- INICIA O WORKER THREAD ---
 # ==============================================================================
-if __name__ == '__main__':
-    # --- INÍCIO DA ALTERAÇÃO (Inicia o Worker Thread) ---
-    # 1. Configura os caminhos ANTES de iniciar a thread
-    data_source.setup_disk_paths()
 
-    # 2. Inicia o coletor de dados (worker) em um processo de fundo
-    print("Iniciando o worker (coletor de dados) em um thread separado...")
-    worker_thread = Thread(target=background_task_wrapper, daemon=True)
-    worker_thread.start()
-    # --- FIM DA ALTERAÇÃO ---
+# 1. Configura os caminhos ANTES de iniciar a thread
+data_source.setup_disk_paths()
 
-    # 3. Inicia o servidor web (site)
-    host = '127.0.0.1'
-    port = 8050
-    print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
+# 2. Inicia o coletor de dados (worker) em um processo de fundo
+# Esta linha será executada pelo Gunicorn assim que o app carregar
+print("Iniciando o worker (coletor de dados) em um thread separado...")
+worker_thread = Thread(target=background_task_wrapper, daemon=True)
+worker_thread.start()
 
-    # NOTA: Não usamos app.run() aqui, pois o Gunicorn é que vai rodar no servidor.
-    # Esta seção __main__ é apenas para testes locais.
-    try:
-        app.run(debug=True, host=host, port=port)
-    except Exception as e:
-        print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")
+# 3. O 'if __name__ == "__main__":' foi removido
+#    pois o Gunicorn não o executa. O app é iniciado pelo 'server'
+#    no arquivo app.py
