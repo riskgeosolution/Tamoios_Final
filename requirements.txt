@@ -14,5 +14,3 @@ sqlalchemy
 psycopg2-binary
 SQLAlchemy
 openpyxl
-plotly-orca
-kaleido
