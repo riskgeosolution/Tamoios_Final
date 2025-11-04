@@ -576,7 +576,7 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         if df_filtrado['timestamp'].dt.tz is None:
             print("LOG PDF: Detectados timestamps 'naive'. Assumindo UTC.")
             try:
-                df_filtrado['timestamp'] = df_filtrado['timestamp'].dt.tz_localize('UTC')
+                df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC')
             except Exception as e_tz:
                 print(f"LOG PDF: Falha ao localizar timestamps 'naive' (pode ser misto): {e_tz}")
                 df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC',
@@ -589,6 +589,7 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         # 3. Configurações e Status
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         status_atual_dict = status_json
+        status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
         risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
@@ -608,9 +609,11 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
         fig_chuva_pdf.add_trace(
             go.Bar(x=df_filtrado['timestamp_local'], y=df_filtrado['chuva_mm'], name='Pluv. Horária (mm)',
                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+
         fig_chuva_pdf.add_trace(go.Scatter(x=df_chuva_72h_pdf['timestamp_local'], y=df_chuva_72h_pdf['chuva_mm'],
                                            name='Acumulada (72h)', mode='lines',
                                            line=dict(color='#007BFF', width=2.5)), secondary_y=True)
+
         titulo_chuva = f"Pluviometria - Estação {config['nome']}"
         fig_chuva_pdf.update_layout(
             title_text=titulo_chuva, template=TEMPLATE_GRAFICO_MODERNO,
