@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO v9: Adicionado o callback do Toggler)
+# index.py (CORRIGIDO: Removido o callback do Toggler)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -50,13 +50,10 @@ def worker_verificar_alertas(status_novos, status_antigos):
         return status_antigos
     if not isinstance(status_antigos, dict):
         status_antigos = {pid: "INDEFINIDO" for pid in PONTOS_DE_ANALISE.keys()}
-
     status_atualizado = status_antigos.copy()
-
     for id_ponto in PONTOS_DE_ANALISE.keys():
         status_novo = status_novos.get(id_ponto, "SEM DADOS")
         status_antigo = status_antigos.get(id_ponto, "INDEFINIDO")
-
         if status_novo != status_antigo:
             try:
                 nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
@@ -66,8 +63,11 @@ def worker_verificar_alertas(status_novos, status_antigos):
             except Exception as e:
                 print(f"Erro ao gerar log de mudança de status: {e}")
 
-            status_atualizado[id_ponto] = status_novo
+            # --- ATENÇÃO: Seus alertas ainda estão desativados ---
+            # alertas.enviar_alerta(id_ponto, PONTOS_DE_ANALISE[id_ponto]['nome'], status_novo, status_antigo)
+            # --- FIM DO ATENÇÃO ---
 
+            status_atualizado[id_ponto] = status_novo
     return status_atualizado
 
 
@@ -77,9 +77,7 @@ def worker_main_loop():
         historico_df, status_antigos_do_disco, logs = data_source.get_all_data_from_disk()
         if not status_antigos_do_disco:
             status_antigos_do_disco = {p: "INDEFINIDO" for p in PONTOS_DE_ANALISE.keys()}
-
         print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
-
         if historico_df.empty or historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67'].empty:
             print("[Worker Thread] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
             try:
@@ -88,10 +86,8 @@ def worker_main_loop():
                 print(f"[Worker Thread] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
         historico_completo, _, _ = data_source.get_all_data_from_disk()
-
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
@@ -106,9 +102,7 @@ def worker_main_loop():
                     status_atualizado[id_ponto] = status_ponto
                 else:
                     status_atualizado[id_ponto] = "SEM DADOS"
-
         status_final_com_alertas = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
-
         try:
             with open(data_source.STATUS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(status_final_com_alertas, f, indent=2)
@@ -116,10 +110,8 @@ def worker_main_loop():
             print(f"ERRO CRÍTICO (Thread) ao salvar status: {e}")
             traceback.print_exc()
             data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Thread) ao salvar status: {e}")
-
         print(f"WORKER (Thread): Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
         return True
-
     except Exception as e:
         print(f"WORKER ERRO CRÍTICO (Thread) no loop principal: {e}")
         traceback.print_exc()
@@ -128,39 +120,27 @@ def worker_main_loop():
 
 
 def background_task_wrapper():
-    """
-    O loop "inteligente" que sincroniza com o relógio UTC e roda o main_loop.
-    """
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
-
     INTERVALO_EM_MINUTOS = 15
-    CARENCIA_EM_SEGUNDOS = 60  # 1 minuto de "folga"
-
+    CARENCIA_EM_SEGUNDOS = 60
     while True:
         inicio_total = time.time()
-
         worker_main_loop()
-
         tempo_execucao = time.time() - inicio_total
         agora_utc = datetime.datetime.now(datetime.timezone.utc)
-
         minutos_restantes = INTERVALO_EM_MINUTOS - (agora_utc.minute % INTERVALO_EM_MINUTOS)
         proxima_execucao_base_utc = agora_utc + datetime.timedelta(minutes=minutos_restantes)
-
         proxima_execucao_base_utc = proxima_execucao_base_utc.replace(
             second=0,
             microsecond=0
         )
-
         proxima_execucao_com_carencia_utc = proxima_execucao_base_utc + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
         tempo_para_dormir_seg = (proxima_execucao_com_carencia_utc - agora_utc).total_seconds()
-
         if tempo_para_dormir_seg < 0:
             print(f"AVISO (Thread): O ciclo demorou {tempo_execucao:.1f}s e perdeu a janela. Rodando novamente...")
             tempo_para_dormir_seg = 1
-
         print(f"WORKER (Thread): Ciclo levou {tempo_execucao:.1f}s.")
         print(
             f"WORKER (Thread): Próxima execução às {proxima_execucao_com_carencia_utc.isoformat()}. Dormindo por {tempo_para_dormir_seg:.0f}s...")
@@ -169,7 +149,6 @@ def background_task_wrapper():
 
 # ==============================================================================
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
-# (Esta seção não foi alterada)
 # ==============================================================================
 
 app.layout = html.Div([
@@ -189,8 +168,7 @@ app.layout = html.Div([
 
 
 # ==============================================================================
-# --- CALLBACKS (com uma nova adição) ---
-# (As seções 1-6 não foram alteradas)
+# --- CALLBACKS ---
 # ==============================================================================
 
 @app.callback(
@@ -213,7 +191,6 @@ def display_page_root(session_data, pathname):
 def display_page_content(pathname, session_data):
     if not session_data.get('logged_in', False):
         return html.Div()
-
     if pathname.startswith('/ponto/'):
         return specific_dash.get_layout()
     elif pathname == '/dashboard-geral':
@@ -281,20 +258,8 @@ def update_data_and_logs_from_disk(n_intervals):
     return dados_json_output, status_atual, logs
 
 
-# --- INÍCIO DA ALTERAÇÃO (Novo Callback) ---
-
-# 7. Callback para o menu "hamburger" (Navbar)
-# Este é o callback que estava faltando, que faz o botão funcionar.
-@app.callback(
-    Output("navbar-collapse", "is_open"),
-    [Input("navbar-toggler", "n_clicks")],
-    [State("navbar-collapse", "is_open")],
-)
-def toggle_navbar_collapse(n, is_open):
-    if n:
-        return not is_open
-    return is_open
-
+# --- INÍCIO DA ALTERAÇÃO (Callback do Toggler REMOVIDO) ---
+# O callback 'toggle_navbar_collapse' foi removido
 # --- FIM DA ALTERAÇÃO ---
 
 
@@ -317,7 +282,6 @@ if __name__ == '__main__':
     print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
 
     try:
-        # NOTE: O debug=True é importante para que o servidor reinicie as threads corretamente
         app.run(debug=True, host=host, port=port)
     except Exception as e:
         print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")
