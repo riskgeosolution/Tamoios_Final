@@ -1,4 +1,4 @@
-# pages/specific_dash.py (Corrigido o bug 'className' no Spinner)
+# pages/specific_dash.py (CORRIGIDO: Filtro de logs para remover "Processo Worker")
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -27,7 +27,7 @@ from config import (
     RISCO_MAP, STATUS_MAP_HIERARQUICO
 )
 import processamento
-import gerador_pdf  # Importa o gerador_pdf atualizado
+import gerador_pdf
 import data_source
 
 # --- Mapas de Cores (Mantidos) ---
@@ -45,10 +45,12 @@ CORES_UMIDADE = {
 }
 
 
-# --- Layout da Página Específica (COM INDICADOR DE STATUS) ---
+# --- Layout da Página Específica (COM 48 HORAS) ---
 def get_layout():
     """ Retorna o layout da página de dashboard específico. """
-    opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in [1, 3, 6, 12, 18, 24, 72, 84, 96]] + [
+
+    opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 84, 96]
+    opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico (Máx 7 dias)', 'value': 7 * 24}]
 
     return dbc.Container([
@@ -299,7 +301,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     # --- Fim da Lógica Central ---
 
 
-# --- Callbacks de Logs (Não alterados) ---
+# --- Callbacks de Logs ---
 @app.callback(
     Output('modal-logs', 'is_open'),
     [Input('btn-ver-logs', 'n_clicks'), Input('btn-fechar-logs', 'n_clicks')],
@@ -317,6 +319,7 @@ def toggle_logs_modal(n_open, n_close, is_open):
     return is_open
 
 
+# --- INÍCIO DA ALTERAÇÃO (Filtro de Logs) ---
 @app.callback(
     [Output('modal-logs-content', 'children'),
      Output('store-logs-filtrados', 'data')],
@@ -334,18 +337,29 @@ def load_logs_content(is_open, id_ponto, logs_json):
             logs_list = logs_json
         else:
             logs_list = json.loads(logs_json)
+
         logs_list = [log.strip() for log in logs_list if log.strip()]
         if not logs_list: return "Nenhum evento registrado.", []
+
         logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
-        logs_filtrados_raw = [log for log in logs_ponto_ou_geral if "API: Sucesso" not in log]
+
+        # Filtra logs de rotina (sucesso da API E início do worker)
+        logs_filtrados_raw = [
+            log for log in logs_ponto_ou_geral
+            if "API: Sucesso" not in log and "Processo Worker (Thread) iniciado" not in log
+        ]
+        # --- FIM DA ALTERAÇÃO ---
+
         if not logs_filtrados_raw:
             return f"Nenhum evento crítico ou mudança de status registrada para o ponto {id_ponto}.", []
+
         logs_formatados_display = []
         for log_str in reversed(logs_filtrados_raw):
             parts = log_str.split('|')
             if len(parts) < 3:
                 logs_formatados_display.append(html.P(log_str))
                 continue
+
             timestamp_str_utc_iso = parts[0].strip()
             ponto_str = parts[1].strip()
             msg_str = "|".join(parts[2:]).strip()
@@ -400,9 +414,7 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
         return dash.no_update
 
 
-# --- INÍCIO: NOVOS CALLBACKS DE DOWNLOAD (PDF) ---
-
-# Callback 1: O Gatilho (RÁPIDO)
+# --- Callbacks de Download (Não alterados) ---
 @app.callback(
     [Output('pdf-task-id-store', 'data'),
      Output('pdf-check-interval', 'disabled'),
@@ -425,34 +437,25 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
 def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json):
     if n_clicks is None or not id_ponto:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-
     try:
         task_id = str(uuid.uuid4())
         print(f"[Trigger PDF] Iniciando tarefa: {task_id}")
-
-        # Inicia a thread (a função está em gerador_pdf.py)
         thread = Thread(
             target=gerador_pdf.thread_gerar_pdf,
             args=(task_id, start_date, end_date, id_ponto, status_json)
         )
         thread.start()
-
-        # --- INÍCIO DA CORREÇÃO (className) ---
-        # Envolve o Spinner em um html.Span para aplicar a classe de margem
         status_indicator = html.Div([
             html.Span(dbc.Spinner(size="sm"), className="me-2"),
             "Gerando PDF, por favor aguarde..."
         ])
         return task_id, False, False, False, status_indicator, True, True
-        # --- FIM DA CORREÇÃO ---
-
     except Exception as e:
         print(f"ERRO CRÍTICO ao INICIAR a thread de PDF: {e}")
         traceback.print_exc()
         return dash.no_update, True, False, True, "Erro ao iniciar a geração.", False, False
 
 
-# Callback 2: O Verificador (Pinger)
 @app.callback(
     [Output('download-pdf-especifico', 'data'),
      Output('pdf-check-interval', 'disabled', allow_duplicate=True),
@@ -470,34 +473,25 @@ def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json
 def check_pdf_status(n, task_id):
     if not task_id:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-
     with gerador_pdf.PDF_CACHE_LOCK:
         task = gerador_pdf.PDF_CACHE.get(task_id)
-
     if task:
         try:
             if task["status"] == "concluido":
                 print(f"[Check PDF] Tarefa {task_id} concluída. Enviando download.")
-
-                # (Correção do 'bytearray' mantida)
                 pdf_output = io.BytesIO(task["data"])
-
                 with gerador_pdf.PDF_CACHE_LOCK:
                     del gerador_pdf.PDF_CACHE[task_id]
-
                 return dcc.send_bytes(pdf_output.read(), task["filename"],
                                       type="application/pdf"), True, False, False, None, False, False
-
             elif task["status"] == "erro":
                 print(f"[Check PDF] Tarefa {task_id} falhou: {task['message']}")
                 with gerador_pdf.PDF_CACHE_LOCK:
                     del gerador_pdf.PDF_CACHE[task_id]
-
                 if "Sem dados" in task["message"]:
                     return dash.no_update, True, True, False, None, False, False
                 else:
                     return dash.no_update, True, False, True, None, False, False
-
         except Exception as e:
             with gerador_pdf.PDF_CACHE_LOCK:
                 if task_id in gerador_pdf.PDF_CACHE:
@@ -505,17 +499,10 @@ def check_pdf_status(n, task_id):
             print(f"ERRO CRÍTICO ao processar o cache do PDF: {e}")
             traceback.print_exc()
             return dash.no_update, True, False, True, None, False, False
-
     print(f"[Check PDF] Tarefa {task_id} ainda em andamento...")
     return dash.no_update, False, False, False, dash.no_update, dash.no_update, dash.no_update
 
 
-# --- FIM: NOVOS CALLBACKS DE DOWNLOAD (PDF) ---
-
-
-# --- INÍCIO: NOVOS CALLBACKS DE DOWNLOAD (EXCEL) ---
-
-# Callback 1: O Gatilho (RÁPIDO)
 @app.callback(
     [Output('excel-task-id-store', 'data'),
      Output('excel-check-interval', 'disabled'),
@@ -537,34 +524,25 @@ def check_pdf_status(n, task_id):
 def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
     if n_clicks is None or not id_ponto:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-
     try:
         task_id = str(uuid.uuid4())
         print(f"[Trigger Excel] Iniciando tarefa: {task_id}")
-
-        # Inicia a thread (a função está em gerador_pdf.py)
         thread = Thread(
             target=gerador_pdf.thread_gerar_excel,
             args=(task_id, start_date, end_date, id_ponto)
         )
         thread.start()
-
-        # --- INÍCIO DA CORREÇÃO (className) ---
-        # Envolve o Spinner em um html.Span para aplicar a classe de margem
         status_indicator = html.Div([
             html.Span(dbc.Spinner(size="sm"), className="me-2"),
             "Gerando Excel, por favor aguarde..."
         ])
         return task_id, False, False, False, status_indicator, True, True
-        # --- FIM DA CORREÇÃO ---
-
     except Exception as e:
         print(f"ERRO CRÍTICO ao INICIAR a thread de Excel: {e}")
         traceback.print_exc()
         return dash.no_update, True, False, True, "Erro ao iniciar a geração.", False, False
 
 
-# Callback 2: O Verificador (Pinger)
 @app.callback(
     [Output('download-excel-especifico', 'data'),
      Output('excel-check-interval', 'disabled', allow_duplicate=True),
@@ -582,38 +560,30 @@ def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
 def check_excel_status(n, task_id):
     if not task_id:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-
     with gerador_pdf.EXCEL_CACHE_LOCK:
         task = gerador_pdf.EXCEL_CACHE.get(task_id)
-
     if task:
         try:
             if task["status"] == "concluido":
                 print(f"[Check Excel] Tarefa {task_id} concluída. Enviando download.")
                 with gerador_pdf.EXCEL_CACHE_LOCK:
                     del gerador_pdf.EXCEL_CACHE[task_id]
-
                 return dcc.send_bytes(task["data"], task["filename"],
                                       type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), True, False, False, None, False, False
-
             elif task["status"] == "erro":
                 print(f"[Check Excel] Tarefa {task_id} falhou: {task['message']}")
                 with gerador_pdf.EXCEL_CACHE_LOCK:
                     del gerador_pdf.EXCEL_CACHE[task_id]
-
                 if "Sem dados" in task["message"]:
                     return dash.no_update, True, True, False, None, False, False
                 else:
                     return dash.no_update, True, False, True, None, False, False
-
         except Exception as e:
             with gerador_pdf.EXCEL_CACHE_LOCK:
                 if task_id in gerador_pdf.EXCEL_CACHE:
                     del gerador_pdf.EXCEL_CACHE[task_id]
             print(f"ERRO CRÍTICO ao processar o cache do Excel: {e}")
             return dash.no_update, True, False, True, None, False, False
-
     print(f"[Check Excel] Tarefa {task_id} ainda em andamento...")
     return dash.no_update, False, False, False, dash.no_update, dash.no_update, dash.no_update
-
 # --- FIM: NOVOS CALLBACKS DE DOWNLOAD (EXCEL) ---

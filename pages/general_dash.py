@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO: Nomenclatura para "Estação KM XX" nos títulos)
+# pages/general_dash.py (CORRIGIDO: Adicionado '48 horas')
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -25,8 +25,12 @@ CORES_UMIDADE = {
 # --- Layout da Página Geral ---
 def get_layout():
     """Retorna o layout do dashboard geral."""
-    opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in [1, 3, 6, 12, 18, 24, 72, 84, 96]] + [
+
+    # --- INÍCIO DA ALTERAÇÃO (Adicionado 48 horas) ---
+    opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 84, 96]  # Adicionado 48
+    opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico', 'value': 14 * 24}]
+    # --- FIM DA ALTERAÇÃO ---
 
     return dbc.Container([
         # Seletor de Período
@@ -36,7 +40,7 @@ def get_layout():
                 dcc.Dropdown(
                     id='general-graph-time-selector',
                     options=opcoes_tempo,
-                    value=72,
+                    value=72,  # Mantém 72h como padrão
                     clearable=False,
                     searchable=False
                 ),
