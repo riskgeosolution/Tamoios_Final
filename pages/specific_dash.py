@@ -1,3 +1,5 @@
+# pages/specific_dash.py (CORRIGIDO V8 - FINAL: Corrigindo 'em' por 'in' no filtro de logs)
+
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -537,7 +539,7 @@ def load_logs_content(is_open, id_ponto, logs_json):
         return f"Erro ao formatar logs: {e}", []
 
 
-# --- FIM DA CORREÇÃO (Logs) ---
+# --- FIM DA ALTERAÇÃO (Logs) ---
 
 
 # --- Callback para Gerar e Baixar PDF dos Dados Históricos ---
@@ -654,13 +656,11 @@ def generate_data_pdf(n_clicks, start_date, end_date, id_ponto, status_json):
 
         # 9. Download
         pdf_output = io.BytesIO(pdf_buffer)
-        # O retorno do dcc.send_bytes deve ser o primeiro item da tupla de retorno
         return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf"), False
 
     except Exception as e:
         print(f"ERRO CRÍTICO no Callback PDF:")
         traceback.print_exc()
-        # Retorna dash.no_update e abre o alerta de erro
         return dash.no_update, True
 
 
@@ -716,7 +716,7 @@ def generate_data_excel(n_clicks, start_date, end_date, id_ponto):
         # 1. Preparar datas
         start_dt = pd.to_datetime(start_date).tz_localize('UTC')
 
-        # --- CORREÇÃO (FUSO LOCAL) ---
+        # --- INÍCIO DA CORREÇÃO (FUSO LOCAL) ---
         end_dt_naive = pd.to_datetime(end_date)
         end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
         end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)

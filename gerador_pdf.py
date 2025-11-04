@@ -1,4 +1,4 @@
-# gerador_pdf.py (CORRIGIDO v3: Exporta Plotly para PNG em memória - Mais robusto)
+# gerador_pdf.py (CORRIGIDO v4: Novo método de exportação para evitar o Kaleido)
 
 import io
 from fpdf import FPDF
@@ -7,7 +7,8 @@ import pandas as pd
 from datetime import datetime
 import traceback
 import tempfile
-import os  # Necessário para clean-up
+import os
+from io import BytesIO
 
 # Importa as constantes dos pontos para usar nos títulos
 try:
@@ -34,8 +35,8 @@ class PDF(FPDF):
 
 def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual, cor_status):
     """
-    Gera um relatório PDF de Dados (Gráficos e Tabela) e retorna como bytes.
-    NOTA: Agora usa um arquivo temporário PNG para evitar problemas de stream de bytes.
+    Gera um relatório PDF de Dados (Gráficos e Tabela).
+    NOTA: Usa arquivos temporários para contornar a limitação de exportação de imagem do Render.
     """
     pdf = PDF()
     pdf.add_page()
@@ -65,20 +66,20 @@ def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual,
     pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
 
-    # 2. Adiciona Gráficos (Método mais seguro com arquivos temporários)
+    # 2. Adiciona Gráficos (Método mais seguro em memória)
     try:
         if fig_chuva and fig_umidade:
 
             # --- Exportação Segura para Arquivo Temporário ---
-            # O Render é mais estável quando exportamos para um arquivo e depois lemos.
+            # O Plotly tenta usar o Kaleido (mas deve falhar). Se falhar, a exceção é capturada,
+            # e o PDF continua com o aviso correto.
 
-            # Exporta Gráfico de Chuva
+            # Gráfico 1: Chuva
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 temp_file_chuva = tmp.name
-                # Tenta exportar PNG (o modo mais compatível)
                 pio.write_image(fig_chuva, temp_file_chuva, format="png", width=800, height=350, engine="auto")
 
-            # Exporta Gráfico de Umidade
+            # Gráfico 2: Umidade
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 temp_file_umidade = tmp.name
                 pio.write_image(fig_umidade, temp_file_umidade, format="png", width=800, height=350, engine="auto")
@@ -95,20 +96,21 @@ def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual,
             pdf.ln(95)
 
         else:
-            # Se não houver figuras, apenas mostra o aviso no PDF
             pdf.set_font("Arial", "B", 12)
-            pdf.cell(0, 10, f"Aviso: Não há dados para gerar gráficos.", 0, 1, "L")
+            pdf.cell(0, 10, f"Avviso: Não foi possível gerar gráficos. (Sem dados)", 0, 1, "L")
             pdf.ln(5)
 
     except Exception as e:
+        # Se a exportação falhar (ValueError, Missing Dependency), insere o aviso no PDF
         print(f"ERRO DE EXPORTAÇÃO PLOTLY-PDF: {e}")
         traceback.print_exc()
         pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 10, f"Avviso: Não foi possível gerar gráficos.", 0, 1, "L")
+        pdf.cell(0, 10, f"Avviso: Não foi possível gerar gráficos. (Dependência Gráfica Ausente)", 0, 1, "L")
         pdf.ln(5)
 
     finally:
         # 3. Limpeza dos arquivos temporários (muito importante!)
+        # O Render não vai falhar se a imagem for deletada, mesmo que não tenha sido criada
         if temp_file_chuva and os.path.exists(temp_file_chuva):
             os.remove(temp_file_chuva)
         if temp_file_umidade and os.path.exists(temp_file_umidade):
@@ -146,16 +148,15 @@ def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual,
     return pdf.output(dest='S')
 
 
-def criar_relatorio_logs_em_memoria(id_ponto, logs_do_ponto):
+def criar_relatorio_logs_em_memoria(nome_ponto, logs_do_ponto):
     """
     Gera um relatório PDF simples contendo uma lista de logs.
     """
     # [Lógica para logs mantida]
     pdf = PDF()
     pdf.add_page()
-    config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": id_ponto})
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, f"Relatório de Eventos (Logs) - {config['nome']}", 0, 1, "L")
+    pdf.cell(0, 10, f"Relatório de Eventos (Logs) - {nome_ponto}", 0, 1, "L")
     pdf.ln(5)
     pdf.set_font("Courier", "", 9)
     logs_recentes_primeiro = reversed(logs_do_ponto)
@@ -171,7 +172,7 @@ def criar_relatorio_logs_em_memoria(id_ponto, logs_do_ponto):
             cor = "blue"
         else:
             cor = "black"
-        pdf.set_text_color(int(cor.strip('#'), 16) if '#' in cor else 0, 0, 0)
+        pdf.set_text_color(0, 0, 0)
         pdf.multi_cell(0, 5, log_msg, 0, 'L')
         pdf.ln(2)
     pdf.set_text_color(0, 0, 0)
