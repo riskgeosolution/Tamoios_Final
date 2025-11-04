@@ -1,4 +1,4 @@
-# app.py (CORRIGIDO: Força o "Modo Desktop" com largura fixa e zoom-out)
+# app.py (CORRIGIDO: Força zoom-out inicial com scale=0.25)
 
 import dash
 import dash_bootstrap_components as dbc
@@ -18,11 +18,11 @@ MEU_CSS_LOCAL = [
     "/assets/style.css"
 ]
 
-# --- INÍCIO DA ALTERAÇÃO (Força "Modo Desktop" + Zoom Out) ---
+# --- INÍCIO DA ALTERAÇÃO (Força "Modo Desktop" + Zoom Out 0.25) ---
 # width=1200: Força o layout de desktop.
-# initial-scale=0.1: Força o navegador a carregar 100% "tirado o zoom".
+# initial-scale=0.25: Um valor mais seguro para forçar o zoom-out.
 META_TAGS = [
-    {"name": "viewport", "content": "width=1200, initial-scale=0.1"}
+    {"name": "viewport", "content": "width=1200, initial-scale=0.25"}
 ]
 # --- FIM DA ALTERAÇÃO ---
 
