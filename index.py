@@ -302,11 +302,6 @@ def update_data_and_logs_from_disk(n_intervals):
 data_source.setup_disk_paths()
 
 # 2. Inicia o coletor de dados (worker) em um processo de fundo
-# Esta linha será executada pelo Gunicorn assim que o app carregar
 print("Iniciando o worker (coletor de dados) em um thread separado...")
 worker_thread = Thread(target=background_task_wrapper, daemon=True)
 worker_thread.start()
-
-# 3. O 'if __name__ == "__main__":' foi removido
-#    pois o Gunicorn não o executa. O app é iniciado pelo 'server'
-#    no arquivo app.py
