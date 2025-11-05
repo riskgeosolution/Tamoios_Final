@@ -1,4 +1,4 @@
-# gerador_pdf.py (CORRIGIDO: Posição da legenda com subplots_adjust e bbox_to_anchor)
+# gerador_pdf.py (CORRIGIDO: Adicionada linha vermelha de acumulado do período)
 
 import io
 from fpdf import FPDF, Align
@@ -218,7 +218,14 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
-        # 5. Calcular Acumulado (para o eixo Y2)
+        # --- INÍCIO DA ALTERAÇÃO 1 (Cálculo Cumulativo) ---
+        # Garante que a chuva_mm é numérica e 0 onde for NA, ANTES de qualquer cálculo
+        df_filtrado['chuva_mm'] = pd.to_numeric(df_filtrado['chuva_mm'], errors='coerce').fillna(0)
+        # Calcula o acumulado (cumsum) do período filtrado
+        df_filtrado['chuva_acum_periodo'] = df_filtrado['chuva_mm'].cumsum()
+        # --- FIM DA ALTERAÇÃO 1 ---
+
+        # 5. Calcular Acumulado (Rolling 72h)
         df_chuva_72h_pdf = processamento.calcular_acumulado_rolling(df_filtrado, horas=72)
         if 'timestamp' in df_chuva_72h_pdf.columns:
             if df_chuva_72h_pdf['timestamp'].dt.tz is None:
@@ -250,26 +257,34 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         ax2.plot(df_chuva_72h_pdf['timestamp_local'], df_chuva_72h_pdf['chuva_mm'], color='#007BFF', linewidth=2.5,
                  label='Acumulada (72h)')
+
+        # --- INÍCIO DA ALTERAÇÃO 2 (Plotar Linha Vermelha) ---
+        # LINHA VERMELHA (AX2) - Usa o mesmo eixo ax2
+        ax2.plot(df_filtrado['timestamp_local'], df_filtrado['chuva_acum_periodo'],
+                 color='red',
+                 linewidth=2.0,  # Um pouco mais fina que a azul
+                 linestyle='--',  # Linha tracejada para diferenciar
+                 label='Acumulada (Período)')
+        # --- FIM DA ALTERAÇÃO 2 ---
+
         ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
         ax2.tick_params(axis='y', labelcolor='#007BFF')
 
         fig_chuva_mp.suptitle(f"Pluviometria - Estação {config['nome']}", fontsize=12)
 
-        # --- INÍCIO DA CORREÇÃO (Legenda Chuva) ---
+        # --- INÍCIO DA ALTERAÇÃO 3 (Legenda com 3 colunas) ---
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
 
-        # Coloca a legenda na parte de baixo da FIGURA
         fig_chuva_mp.legend(lines + lines2, labels + labels2,
-                            loc='upper center',  # Ancorar pelo TOPO
-                            ncol=2,
+                            loc='upper center',
+                            ncol=3,  # MUDADO DE 2 PARA 3
                             fancybox=True,
                             shadow=True,
-                            bbox_to_anchor=(0.5, 0.1))  # Posição: 50% larg, 10% alt
+                            bbox_to_anchor=(0.5, 0.1))
 
-        # Ajusta o layout para dar 25% de espaço na parte inferior
         fig_chuva_mp.subplots_adjust(bottom=0.25, top=0.9)
-        # --- FIM DA CORREÇÃO ---
+        # --- FIM DA ALTERAÇÃO 3 ---
 
         # 7. Gerar Gráfico de Umidade (MATPLOTLIB)
         fig_umidade_mp, ax_umidade = plt.subplots(figsize=(10, 5))
@@ -285,23 +300,17 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         ax_umidade.set_xlabel("Data e Hora")
         ax_umidade.set_ylabel("Umidade do Solo (%)")
 
-        # --- INÍCIO DA CORREÇÃO (Legenda Umidade) ---
-        # Pega os handles e labels para colocar na legenda da FIGURA
         lines, labels = ax_umidade.get_legend_handles_labels()
-
         fig_umidade_mp.legend(lines, labels,
-                              loc='upper center',  # Ancorar pelo TOPO
-                              bbox_to_anchor=(0.5, 0.1),  # Posição: 50% larg, 10% alt
+                              loc='upper center',
+                              bbox_to_anchor=(0.5, 0.1),
                               ncol=3,
                               fancybox=True,
                               shadow=True)
 
         plt.grid(True, linestyle='--', alpha=0.6)
         ax_umidade.tick_params(axis='x', rotation=45, labelsize=8)
-
-        # Ajusta o layout para dar 25% de espaço na parte inferior
         fig_umidade_mp.subplots_adjust(bottom=0.25, top=0.9)
-        # --- FIM DA CORREÇÃO ---
 
         # 8. Chamar a função de gerar PDF
         pdf_buffer = criar_relatorio_em_memoria(
