@@ -1,4 +1,4 @@
-# pages/map_view.py (CORRIGIDO: Desativado o zoom de pinça do mapa)
+# pages/map_view.py (CORRIGIDO: Título do card abreviado para "Umid. Solo(72h)")
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -30,11 +30,8 @@ def get_layout():
                     dl.Map(
                         id='mapa-principal', center=[-23.5951, -45.4438], zoom=13,
 
-                        # --- INÍCIO DA ALTERAÇÃO ---
-                        # Desativa o zoom de pinça no mapa.
-                        # Isso permite que o navegador controle o zoom da página inteira.
+                        # (Mantém a configuração de Modo Desktop)
                         touchZoom=False,
-                        # --- FIM DA ALTERAÇÃO ---
 
                         children=[
                             dl.TileLayer(),
@@ -60,10 +57,6 @@ def get_layout():
         traceback.print_exc();
         return html.Div(
             [html.H1("Erro Layout Mapa"), html.Pre(traceback.format_exc())])
-
-
-# (O resto do arquivo 'map_view.py' não precisa ser alterado)
-# ... (todo o código de callbacks) ...
 
 
 # --- Callback 1: Atualiza os Pinos no mapa ---
@@ -142,23 +135,28 @@ def get_color_class_chuva(value):
 
 # --- Função create_km_block ---
 def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
+    """
+    Cria o bloco de resumo do KM para os cards laterais.
+    """
+
     ultima_chuva_72h = 0.0
     status_chuva_txt = "SEM DADOS"
     status_chuva_col = "secondary"
     cor_chuva_class = "bg-secondary"
-    status_umid_txt = "SEM DADOS"
-    status_umid_col = "secondary"
-    cor_umidade_class = "bg-secondary"
-    risco_umidade = -1
+
     status_chuva_txt = status_ponto_txt
     _, status_chuva_col, cor_chuva_class = STATUS_MAP_HIERARQUICO.get(
         RISCO_MAP.get(status_chuva_txt, -1),
         STATUS_MAP_HIERARQUICO[-1]
     )
-    status_umid_txt = status_ponto_txt
-    status_umid_col = status_chuva_col
-    cor_umidade_class = cor_chuva_class
-    risco_umidade = RISCO_MAP.get(status_umid_txt, -1)
+
+    # --- (Status da Umidade travado como INDEFINIDO) ---
+    status_umid_txt = "INDEFINIDO"
+    status_umid_col = "secondary"
+    cor_umidade_class = "bg-secondary"
+    risco_umidade = -1
+    # --- FIM ---
+
     try:
         if not df_ponto.empty:
             if 'timestamp' in df_ponto.columns:
@@ -178,11 +176,14 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         status_chuva_txt = "ERRO";
         status_chuva_col = "danger";
         cor_chuva_class = "bg-danger"
-        status_umid_txt, status_umid_col, cor_umidade_class = "ERRO", "danger", "bg-danger"
+
+    # --- Lógica do Gauge de Chuva (Visual) ---
     chuva_max_visual = 90.0
     chuva_percent = max(0, min(100, (ultima_chuva_72h / chuva_max_visual) * 100))
     if status_chuva_txt == "SEM DADOS":
         chuva_percent = 0
+
+    # --- Lógica do Gauge de Umidade (Visual) ---
     umidade_percent_realista = 0
     if risco_umidade == 0:
         umidade_percent_realista = 25
@@ -192,8 +193,8 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         umidade_percent_realista = 75
     elif risco_umidade == 3:
         umidade_percent_realista = 100
-    if status_umid_txt == "SEM DADOS":
-        umidade_percent_realista = 0
+
+    # --- Montagem dos Gauges ---
     chuva_gauge = html.Div(
         [
             html.Div(className=f"gauge-bar {cor_chuva_class}", style={'height': f'{chuva_percent}%'}),
@@ -204,19 +205,29 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         ], className="gauge-vertical-container"
     )
     umidade_gauge = html.Div(
-        [html.Div(className=f"gauge-bar {cor_umidade_class}", style={'height': f'{umidade_percent_realista}%'})],
+        [
+            html.Div(className=f"gauge-bar {cor_umidade_class}", style={'height': f'{umidade_percent_realista}%'})
+        ],
         className="gauge-vertical-container"
     )
     chuva_badge = dbc.Badge(status_chuva_txt, color=status_chuva_col, className="w-100 mt-1 small badge-black-text")
     umidade_badge = dbc.Badge(status_umid_txt, color=status_umid_col, className="w-100 mt-1 small badge-black-text")
+
+    # Envolve com Link (mantido)
     link_destino = f"/ponto/{id_ponto}"
     conteudo_bloco = html.Div([
         html.H6(f"Estação {config['nome']}", className="text-center mb-1"),
         dbc.Row([
             dbc.Col([html.Div("Chuva (72h)", className="small text-center"), chuva_gauge, chuva_badge], width=6),
-            dbc.Col([html.Div("Status Geral", className="small text-center"), umidade_gauge, umidade_badge], width=6),
+
+            # --- INÍCIO DA ALTERAÇÃO (Título da Coluna Abreviado) ---
+            dbc.Col([html.Div("Umid. Solo(72h)", className="small text-center"), umidade_gauge, umidade_badge],
+                    width=6),
+            # --- FIM DA ALTERAÇÃO ---
+
         ], className="g-0"),
     ], className="km-summary-block")
+
     return html.A(
         conteudo_bloco,
         href=link_destino,
