@@ -1,4 +1,4 @@
-# index.py (REVERTIDO: Footer de Copyright removido)
+# index.py (CORRIGIDO: Lógica de backfill inteligente e SEGURA que usa 'append')
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -41,7 +41,6 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
-# (Esta seção não foi alterada)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -50,10 +49,13 @@ def worker_verificar_alertas(status_novos, status_antigos):
         return status_antigos
     if not isinstance(status_antigos, dict):
         status_antigos = {pid: "INDEFINIDO" for pid in PONTOS_DE_ANALISE.keys()}
+
     status_atualizado = status_antigos.copy()
+
     for id_ponto in PONTOS_DE_ANALISE.keys():
         status_novo = status_novos.get(id_ponto, "SEM DADOS")
         status_antigo = status_antigos.get(id_ponto, "INDEFINIDO")
+
         if status_novo != status_antigo:
             try:
                 nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
@@ -71,27 +73,69 @@ def worker_verificar_alertas(status_novos, status_antigos):
     return status_atualizado
 
 
+# --- INÍCIO DA ALTERAÇÃO (Lógica de Backfill Inteligente) ---
 def worker_main_loop():
     inicio_ciclo = time.time()
     try:
+        # 1. Lê o histórico (cache CSV de 72h) e os status
         historico_df, status_antigos_do_disco, logs = data_source.get_all_data_from_disk()
         if not status_antigos_do_disco:
             status_antigos_do_disco = {p: "INDEFINIDO" for p in PONTOS_DE_ANALISE.keys()}
+
         print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
-        if historico_df.empty or historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67'].empty:
+
+        # --- INÍCIO DA NOVA LÓGICA DE BACKFILL (GAP CHECK) ---
+        df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
+        run_backfill = False
+
+        if df_km67.empty:
             print("[Worker Thread] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
+            run_backfill = True
+        else:
+            # Verifica se há um "gap" (buraco) desde o último dado
             try:
-                data_source.backfill_km67_pro_data(historico_df)
+                # Garante que o timestamp seja datetime antes de comparar
+                if not pd.api.types.is_datetime64_any_dtype(df_km67['timestamp']):
+                    df_km67.loc[:, 'timestamp'] = pd.to_datetime(df_km67['timestamp'])
+
+                latest_timestamp = df_km67['timestamp'].max()
+                agora_utc = datetime.datetime.now(datetime.timezone.utc)
+                gap_segundos = (agora_utc - latest_timestamp).total_seconds()
+
+                # Se o último dado for mais antigo que 20 minutos (15 min + 5 min de margem)
+                if gap_segundos > (20 * 60):
+                    print(
+                        f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para o KM 67. Tentando backfill...")
+                    run_backfill = True
+                else:
+                    print(
+                        f"[Worker Thread] Dados do KM 67 estão atualizados ({gap_segundos / 60:.0f} min). Backfill não necessário.")
+            except Exception as e_gap:
+                print(f"[Worker Thread] Erro ao checar 'gap' de dados: {e_gap}. Pulando backfill.")
+
+        if run_backfill:
+            try:
+                # Chama a sua função de backfill original (que é segura e usa 'append')
+                data_source.backfill_km67_pro_data(historico_df)  # <- Passa o df_historico
+
+                # Recarrega o CSV (que agora está corrigido)
                 historico_df, _, _ = data_source.get_all_data_from_disk()
                 print(f"[Worker Thread] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
+        # --- FIM DA NOVA LÓGICA DE BACKFILL ---
+
+        # 2. COLETAR NOVOS DADOS DA API (passo /current)
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
+
+        # 3. RECARREGAR O HISTÓRICO COMPLETO APÓS SALVAMENTO
         historico_completo, _, _ = data_source.get_all_data_from_disk()
+
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
         else:
+            # 4. Calcular Status
             status_atualizado = {}
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
@@ -102,7 +146,11 @@ def worker_main_loop():
                     status_atualizado[id_ponto] = status_ponto
                 else:
                     status_atualizado[id_ponto] = "SEM DADOS"
+
+        # 5. Verificar alertas
         status_final_com_alertas = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
+
+        # 6. SALVAR O STATUS ATUALIZADO NO DISCO
         try:
             with open(data_source.STATUS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(status_final_com_alertas, f, indent=2)
@@ -110,14 +158,18 @@ def worker_main_loop():
             print(f"ERRO CRÍTICO (Thread) ao salvar status: {e}")
             traceback.print_exc()
             data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Thread) ao salvar status: {e}")
+
         print(f"WORKER (Thread): Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
         return True
+
     except Exception as e:
         print(f"WORKER ERRO CRÍTICO (Thread) no loop principal: {e}")
         traceback.print_exc()
         data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Thread loop): {e}")
         return False
 
+
+# --- FIM DA ALTERAÇÃO ---
 
 def background_task_wrapper():
     data_source.setup_disk_paths()
@@ -149,7 +201,6 @@ def background_task_wrapper():
 
 # ==============================================================================
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
-# --- INÍCIO DA REVERSÃO (Footer Removido) ---
 # ==============================================================================
 
 app.layout = html.Div([
@@ -164,11 +215,8 @@ app.layout = html.Div([
         n_intervals=0,
         disabled=True
     ),
-    html.Div(id='page-container-root')  # <- Revertido ao original
+    html.Div(id='page-container-root')
 ])
-
-
-# --- FIM DA REVERSÃO ---
 
 
 # ==============================================================================
@@ -263,7 +311,7 @@ def update_data_and_logs_from_disk(n_intervals):
     return dados_json_output, status_atual, logs
 
 
-# (O callback do Toggler foi removido, o que está correto para o modo desktop)
+# (O callback do Toggler foi removido)
 
 
 # ==============================================================================
