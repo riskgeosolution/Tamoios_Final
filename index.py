@@ -1,11 +1,11 @@
-# index.py (CORRIGIDO: Lógica de backfill inteligente e SEGURA que usa 'append')
+# index.py (CORRIGIDO: Impede o worker duplicado do modo Debug)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
 import pandas as pd
 from io import StringIO
-import os
+import os  # <-- Importa o OS para a correção
 import json
 from dotenv import load_dotenv
 import time
@@ -41,6 +41,7 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
+# (Esta seção não foi alterada)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -73,7 +74,6 @@ def worker_verificar_alertas(status_novos, status_antigos):
     return status_atualizado
 
 
-# --- INÍCIO DA ALTERAÇÃO (Lógica de Backfill Inteligente) ---
 def worker_main_loop():
     inicio_ciclo = time.time()
     try:
@@ -84,7 +84,7 @@ def worker_main_loop():
 
         print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
-        # --- INÍCIO DA NOVA LÓGICA DE BACKFILL (GAP CHECK) ---
+        # --- LÓGICA DE BACKFILL (GAP CHECK) ---
         df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
         run_backfill = False
 
@@ -92,9 +92,7 @@ def worker_main_loop():
             print("[Worker Thread] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
             run_backfill = True
         else:
-            # Verifica se há um "gap" (buraco) desde o último dado
             try:
-                # Garante que o timestamp seja datetime antes de comparar
                 if not pd.api.types.is_datetime64_any_dtype(df_km67['timestamp']):
                     df_km67.loc[:, 'timestamp'] = pd.to_datetime(df_km67['timestamp'])
 
@@ -102,7 +100,6 @@ def worker_main_loop():
                 agora_utc = datetime.datetime.now(datetime.timezone.utc)
                 gap_segundos = (agora_utc - latest_timestamp).total_seconds()
 
-                # Se o último dado for mais antigo que 20 minutos (15 min + 5 min de margem)
                 if gap_segundos > (20 * 60):
                     print(
                         f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para o KM 67. Tentando backfill...")
@@ -115,15 +112,12 @@ def worker_main_loop():
 
         if run_backfill:
             try:
-                # Chama a sua função de backfill original (que é segura e usa 'append')
-                data_source.backfill_km67_pro_data(historico_df)  # <- Passa o df_historico
-
-                # Recarrega o CSV (que agora está corrigido)
+                data_source.backfill_km67_pro_data(historico_df)
                 historico_df, _, _ = data_source.get_all_data_from_disk()
                 print(f"[Worker Thread] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-        # --- FIM DA NOVA LÓGICA DE BACKFILL ---
+        # --- FIM DO BACKFILL ---
 
         # 2. COLETAR NOVOS DADOS DA API (passo /current)
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
@@ -168,8 +162,6 @@ def worker_main_loop():
         data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Thread loop): {e}")
         return False
 
-
-# --- FIM DA ALTERAÇÃO ---
 
 def background_task_wrapper():
     data_source.setup_disk_paths()
@@ -315,16 +307,25 @@ def update_data_and_logs_from_disk(n_intervals):
 
 
 # ==============================================================================
-# --- SEÇÃO DE EXECUÇÃO LOCAL (Não alterada) ---
+# --- SEÇÃO DE EXECUÇÃO LOCAL (COM CORREÇÃO PARA DEBUG MODE) ---
 # ==============================================================================
 
 # 1. Configura os caminhos ANTES de iniciar a thread
 data_source.setup_disk_paths()
 
-# 2. Inicia o coletor de dados (worker) em um processo de fundo
-print("Iniciando o worker (coletor de dados) em um thread separado...")
-worker_thread = Thread(target=background_task_wrapper, daemon=True)
-worker_thread.start()
+# --- INÍCIO DA CORREÇÃO (Evita worker duplicado) ---
+# Verifica se o script está sendo rodado pelo reloader do Dash
+# Se 'WERKZEUG_RUN_MAIN' não estiver definido, significa que este é o
+# processo principal (seja no Render ou no 'python index.py' local)
+# e nós DEVEMOS iniciar o worker.
+if not os.environ.get("WERKZEUG_RUN_MAIN"):
+    print("Iniciando o worker (coletor de dados) em um thread separado...")
+    worker_thread = Thread(target=background_task_wrapper, daemon=True)
+    worker_thread.start()
+else:
+    print("O reloader do Dash está ativo. O worker não será iniciado neste processo.")
+# --- FIM DA CORREÇÃO ---
+
 
 # 3. O bloco if __name__ == '__main__': é mantido APENAS para teste local
 if __name__ == '__main__':
@@ -333,6 +334,7 @@ if __name__ == '__main__':
     print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
 
     try:
+        # debug=True ainda pode ser usado com segurança agora
         app.run(debug=True, host=host, port=port)
     except Exception as e:
         print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")

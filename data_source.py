@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO v9: Corrigindo Importação Circular)
+# data_source.py (CORRIGIDO: Lógica da Query SQL para < end_dt)
 
 import pandas as pd
 import json
@@ -126,15 +126,22 @@ def migrate_csv_to_sqlite_initial():
 def read_data_from_sqlite(id_ponto, start_dt, end_dt):
     print(f"[SQLite] Consultando dados para {id_ponto} de {start_dt} a {end_dt}")
     engine = get_engine()
-    start_str = start_dt.isoformat()
-    end_str = end_dt.isoformat()
+
+    # Usa strftime para garantir o formato 'YYYY-MM-DD HH:MM:SS' (com espaço)
+    start_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+    end_str = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    # --- INÍCIO DA CORREÇÃO (Query SQL) ---
+    # Trocamos <= :end por < :end
     query = f"""
         SELECT * FROM {DB_TABLE_NAME}
         WHERE id_ponto = :ponto
         AND timestamp >= :start
-        AND timestamp <= :end
+        AND timestamp < :end
         ORDER BY timestamp ASC
     """
+    # --- FIM DA CORREÇÃO ---
+
     try:
         df = pd.read_sql_query(
             query,
@@ -290,7 +297,6 @@ def arredondar_timestamp_15min(ts_epoch):
 
 def fetch_data_from_weatherlink_api(df_historico):
     # --- INÍCIO DA CORREÇÃO (Importação Circular) ---
-    # Movido 'import processamento' para dentro da função
     import processamento
     # --- FIM DA CORREÇÃO ---
 
@@ -400,7 +406,7 @@ def fetch_data_from_weatherlink_api(df_historico):
     return pd.DataFrame(dados_processados), status_calculados, logs_api
 
 
-def backfill_km67_pro_data(df_historico_existente):
+def backfill_km67_pro_data(df_historico_existente):  # <- O argumento está aqui
     id_ponto = "Ponto-A-KM67"
     station_config = WEATHERLINK_CONFIG[id_ponto]
     station_id = station_config['STATION_ID']
@@ -470,8 +476,10 @@ def backfill_km67_pro_data(df_historico_existente):
         if 'timestamp' in df_backfill.columns:
             df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
 
+        # --- LÓGICA SEGURA (append no SQLite) ---
         save_to_sqlite(df_backfill)
 
+        # --- LÓGICA SEGURA (merge no CSV) ---
         df_final_csv = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
         save_historico_to_csv(df_final_csv)
 

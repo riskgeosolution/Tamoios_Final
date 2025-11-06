@@ -1,4 +1,4 @@
-# gerador_pdf.py (CORRIGIDO: Adicionada linha vermelha de acumulado do período)
+# gerador_pdf.py (CORRIGIDO: Lógica de data final em PDF e Excel)
 
 import io
 from fpdf import FPDF, Align
@@ -35,6 +35,7 @@ EXCEL_CACHE_LOCK = threading.Lock()
 def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor, periodo_str=""):
     """
     Cria um relatório PDF em buffer de memória.
+    (Esta função não foi alterada)
     """
 
     # --- 1. Inicializa o PDF ---
@@ -187,23 +188,30 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
     Esta é a função que roda na thread.
     """
     try:
+        # 1. Preparar datas
         data_inicio_str = pd.to_datetime(start_date).strftime('%d/%m/%Y')
         data_fim_str = pd.to_datetime(end_date).strftime('%d/%m/%Y')
         periodo_str = f"({data_inicio_str} a {data_fim_str})"
 
-        # 1. Preparar datas
-        start_dt = pd.to_datetime(start_date).tz_localize('UTC')
+        start_dt_naive = pd.to_datetime(start_date)
+        start_dt_local = start_dt_naive.tz_localize('America/Sao_Paulo')
+        start_dt = start_dt_local.tz_convert('UTC')  # Converte para UTC para a query
+
         end_dt_naive = pd.to_datetime(end_date)
-        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
-        end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        end_dt = end_dt_local_final.tz_convert('UTC')
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')  # Fim do dia em SP
+
+        # --- INÍCIO DA CORREÇÃO (PDF Data Final) ---
+        # Em vez de (dia + 1) - 1 segundo, apenas pegamos o início do dia seguinte.
+        end_dt_local_final = end_dt_local + pd.Timedelta(days=1)
+        # --- FIM DA CORREÇÃO ---
+
+        end_dt = end_dt_local_final.tz_convert('UTC')  # Converte para UTC para a query
 
         # 2. Ler dados DIRETAMENTE DO SQLITE
         df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
-        df_filtrado = df_filtrado.dropna(subset=['timestamp'])
 
         if df_filtrado.empty:
-            print(f"[Thread PDF {task_id}] Sem dados no período selecionado.")
+            print(f"[Thread PDF {task_id}] Sem dados no período selecionado (Query: {start_dt} a {end_dt}).")
             raise Exception("Sem dados no período selecionado.")
 
         # 3. Fuso Horário
@@ -218,14 +226,10 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
-        # --- INÍCIO DA ALTERAÇÃO 1 (Cálculo Cumulativo) ---
-        # Garante que a chuva_mm é numérica e 0 onde for NA, ANTES de qualquer cálculo
+        # 5. Calcular Acumulados
         df_filtrado['chuva_mm'] = pd.to_numeric(df_filtrado['chuva_mm'], errors='coerce').fillna(0)
-        # Calcula o acumulado (cumsum) do período filtrado
         df_filtrado['chuva_acum_periodo'] = df_filtrado['chuva_mm'].cumsum()
-        # --- FIM DA ALTERAÇÃO 1 ---
 
-        # 5. Calcular Acumulado (Rolling 72h)
         df_chuva_72h_pdf = processamento.calcular_acumulado_rolling(df_filtrado, horas=72)
         if 'timestamp' in df_chuva_72h_pdf.columns:
             if df_chuva_72h_pdf['timestamp'].dt.tz is None:
@@ -238,7 +242,6 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         # 6. Gerar Gráfico de Chuva (MATPLOTLIB)
         largura_barra_dias = 1 / 144  # 10 minutos
-
         fig_chuva_mp, ax1 = plt.subplots(figsize=(10, 5))
 
         ax1.bar(df_filtrado['timestamp_local'], df_filtrado['chuva_mm'],
@@ -258,33 +261,28 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         ax2.plot(df_chuva_72h_pdf['timestamp_local'], df_chuva_72h_pdf['chuva_mm'], color='#007BFF', linewidth=2.5,
                  label='Acumulada (72h)')
 
-        # --- INÍCIO DA ALTERAÇÃO 2 (Plotar Linha Vermelha) ---
-        # LINHA VERMELHA (AX2) - Usa o mesmo eixo ax2
         ax2.plot(df_filtrado['timestamp_local'], df_filtrado['chuva_acum_periodo'],
                  color='red',
-                 linewidth=2.0,  # Um pouco mais fina que a azul
-                 linestyle='--',  # Linha tracejada para diferenciar
+                 linewidth=2.0,
+                 linestyle='--',
                  label='Acumulada (Período)')
-        # --- FIM DA ALTERAÇÃO 2 ---
 
         ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
         ax2.tick_params(axis='y', labelcolor='#007BFF')
 
         fig_chuva_mp.suptitle(f"Pluviometria - Estação {config['nome']}", fontsize=12)
 
-        # --- INÍCIO DA ALTERAÇÃO 3 (Legenda com 3 colunas) ---
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
 
         fig_chuva_mp.legend(lines + lines2, labels + labels2,
                             loc='upper center',
-                            ncol=3,  # MUDADO DE 2 PARA 3
+                            ncol=3,
                             fancybox=True,
                             shadow=True,
                             bbox_to_anchor=(0.5, 0.1))
 
         fig_chuva_mp.subplots_adjust(bottom=0.25, top=0.9)
-        # --- FIM DA ALTERAÇÃO 3 ---
 
         # 7. Gerar Gráfico de Umidade (MATPLOTLIB)
         fig_umidade_mp, ax_umidade = plt.subplots(figsize=(10, 5))
@@ -351,22 +349,28 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
 def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
     """
-    (Esta função não foi alterada)
+    Esta é a função que roda na thread para o Excel.
     """
     try:
-        # 1. Preparar datas
-        start_dt = pd.to_datetime(start_date).tz_localize('UTC')
+        start_dt_naive = pd.to_datetime(start_date)
+        start_dt_local = start_dt_naive.tz_localize('America/Sao_Paulo')
+        start_dt = start_dt_local.tz_convert('UTC')
+
         end_dt_naive = pd.to_datetime(end_date)
-        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
-        end_dt_local_final = end_dt_local + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        end_dt = end_dt_local_final.tz_convert('UTC')
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')  # Fim do dia em SP
+
+        # --- INÍCIO DA CORREÇÃO (Excel Data Final) ---
+        # Em vez de (dia + 1) - 1 segundo, apenas pegamos o início do dia seguinte.
+        end_dt_local_final = end_dt_local + pd.Timedelta(days=1)
+        # --- FIM DA CORREÇÃO ---
+
+        end_dt = end_dt_local_final.tz_convert('UTC')  # Converte para UTC para a query
 
         # 2. Ler dados DIRETAMENTE DO SQLITE
         df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
-        df_filtrado = df_filtrado.dropna(subset=['timestamp'])
 
         if df_filtrado.empty:
-            print(f"[Thread Excel {task_id}] Sem dados no período selecionado.")
+            print(f"[Thread Excel {task_id}] Sem dados no período selecionado (Query: {start_dt} a {end_dt}).")
             raise Exception("Sem dados no período selecionado.")
 
         # 3. Fuso Horário para Excel
