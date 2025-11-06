@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO: Filtro de logs para remover "Processo Worker")
+# pages/specific_dash.py (CORRIGIDO: Adicionado indicador de acumulado dinâmico)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -45,7 +45,7 @@ CORES_UMIDADE = {
 }
 
 
-# --- Layout da Página Específica (COM 48 HORAS) ---
+# --- Layout da Página Específica ---
 def get_layout():
     """ Retorna o layout da página de dashboard específico. """
 
@@ -74,11 +74,19 @@ def get_layout():
         html.Div(id='specific-dash-title', className="my-3 text-center"),
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
 
+        # --- INÍCIO DA ALTERAÇÃO (Adicionado Coluna para Acumulado Dinâmico) ---
         dbc.Row([
             dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"),
             dbc.Col(dcc.Dropdown(id='graph-time-selector', options=opcoes_tempo, value=72, clearable=False,
-                                 searchable=False), width=12, lg=4)
+                                 searchable=False), width=12, lg=4),
+            # Novo container para o texto do acumulado
+            dbc.Col(
+                html.Div(id='dynamic-accumulated-output'),
+                width=12, lg=4,
+                className="d-flex align-items-center"  # Alinha verticalmente
+            )
         ], align="center", className="my-3"),
+        # --- FIM DA ALTERAÇÃO ---
 
         dbc.Row(id='specific-dash-graphs', children=[dbc.Spinner(size="lg")], className="my-4"),
 
@@ -319,7 +327,6 @@ def toggle_logs_modal(n_open, n_close, is_open):
     return is_open
 
 
-# --- INÍCIO DA ALTERAÇÃO (Filtro de Logs) ---
 @app.callback(
     [Output('modal-logs-content', 'children'),
      Output('store-logs-filtrados', 'data')],
@@ -337,29 +344,23 @@ def load_logs_content(is_open, id_ponto, logs_json):
             logs_list = logs_json
         else:
             logs_list = json.loads(logs_json)
-
         logs_list = [log.strip() for log in logs_list if log.strip()]
         if not logs_list: return "Nenhum evento registrado.", []
-
         logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
 
-        # Filtra logs de rotina (sucesso da API E início do worker)
         logs_filtrados_raw = [
             log for log in logs_ponto_ou_geral
             if "API: Sucesso" not in log and "Processo Worker (Thread) iniciado" not in log
         ]
-        # --- FIM DA ALTERAÇÃO ---
 
         if not logs_filtrados_raw:
             return f"Nenhum evento crítico ou mudança de status registrada para o ponto {id_ponto}.", []
-
         logs_formatados_display = []
         for log_str in reversed(logs_filtrados_raw):
             parts = log_str.split('|')
             if len(parts) < 3:
                 logs_formatados_display.append(html.P(log_str))
                 continue
-
             timestamp_str_utc_iso = parts[0].strip()
             ponto_str = parts[1].strip()
             msg_str = "|".join(parts[2:]).strip()
@@ -586,4 +587,59 @@ def check_excel_status(n, task_id):
             return dash.no_update, True, False, True, None, False, False
     print(f"[Check Excel] Tarefa {task_id} ainda em andamento...")
     return dash.no_update, False, False, False, dash.no_update, dash.no_update, dash.no_update
+
+
 # --- FIM: NOVOS CALLBACKS DE DOWNLOAD (EXCEL) ---
+
+
+# --- INÍCIO: NOVO CALLBACK PARA ACUMULADO DINÂMICO ---
+@app.callback(
+    Output('dynamic-accumulated-output', 'children'),
+    [Input('graph-time-selector', 'value'),
+     Input('store-dados-sessao', 'data'),
+     Input('url-raiz', 'pathname')]
+)
+def update_dynamic_accumulated_text(selected_hours, dados_json, pathname):
+    # 1. Condições de saída
+    # Se for 72h (o padrão) ou se não tiver dados, não mostra nada.
+    if selected_hours == 72 or not dados_json or not pathname.startswith('/ponto/'):
+        return None  # Retorna vazio
+
+    try:
+        # 2. Pegar o ID do ponto
+        id_ponto = pathname.split('/')[-1]
+
+        # 3. Carregar e filtrar os dados (igual ao outro callback)
+        df_completo = pd.read_json(StringIO(dados_json), orient='split')
+        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
+
+        if df_ponto.empty:
+            return None
+
+        # 4. Calcular o acumulado para o período selecionado
+        # (Garante a tipagem antes de calcular)
+        df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
+        df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
+
+        df_acumulado = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
+
+        if df_acumulado.empty:
+            return None
+
+        # 5. Pegar o último valor
+        valor_acumulado = df_acumulado.iloc[-1]['chuva_mm']
+
+        if pd.isna(valor_acumulado):
+            return None
+
+        # 6. Formatar e retornar o componente
+        texto_formatado = f"Acumulado ({selected_hours}h): {valor_acumulado:.1f} mm"
+
+        # Retorna o texto com o estilo que o usuário pediu (pequeno, da cor do dropdown)
+        return html.P(texto_formatado, className="mb-0 ms-3",
+                      style={'fontSize': '0.85rem', 'fontWeight': 'bold', 'color': '#555'})
+
+    except Exception as e:
+        print(f"Erro ao calcular acumulado dinâmico: {e}")
+        return None
+# --- FIM DO NOVO CALLBACK ---

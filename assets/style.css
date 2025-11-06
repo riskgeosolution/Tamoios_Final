@@ -1,4 +1,4 @@
-/* assets/style.css (COMPLETO: Removida regra @media) */
+/* assets/style.css (COMPLETO: Adicionado CSS do Footer) */
 
 /* --- NOVO: Fundo azul suave para a página de login --- */
 .bg-gemini-blue {
@@ -58,3 +58,22 @@ h1, h2, h3, h4, h5, h6 { color: #343a40; margin-bottom: 0.5rem; }
 
 
 /* --- NENHUMA REGRA @media AQUI --- */
+
+
+/* --- INÍCIO: ESTILO DO FOOTER DE COPYRIGHT (Minimalista) --- */
+.footer-fixed-bottom {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+
+    /* Removemos o fundo e a borda */
+    /* background-color: #f8f9fa; */
+    /* border-top: 1px solid #dee2e6; */
+
+    height: 30px; /* Altura menor */
+    z-index: 1020;
+
+    /* Adicionamos padding-bottom para empurrar o texto para baixo */
+    padding-bottom: 5px;
+}
+/* --- FIM: ESTILO DO FOOTER --- */

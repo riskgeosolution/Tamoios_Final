@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO: Removido o callback do Toggler)
+# index.py (REVERTIDO: Footer de Copyright removido)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -149,6 +149,7 @@ def background_task_wrapper():
 
 # ==============================================================================
 # --- LAYOUT PRINCIPAL DA APLICAÇÃO (A RAIZ) ---
+# --- INÍCIO DA REVERSÃO (Footer Removido) ---
 # ==============================================================================
 
 app.layout = html.Div([
@@ -163,12 +164,16 @@ app.layout = html.Div([
         n_intervals=0,
         disabled=True
     ),
-    html.Div(id='page-container-root')
+    html.Div(id='page-container-root')  # <- Revertido ao original
 ])
+
+
+# --- FIM DA REVERSÃO ---
 
 
 # ==============================================================================
 # --- CALLBACKS ---
+# (Esta seção não foi alterada)
 # ==============================================================================
 
 @app.callback(
@@ -258,9 +263,7 @@ def update_data_and_logs_from_disk(n_intervals):
     return dados_json_output, status_atual, logs
 
 
-# --- INÍCIO DA ALTERAÇÃO (Callback do Toggler REMOVIDO) ---
-# O callback 'toggle_navbar_collapse' foi removido
-# --- FIM DA ALTERAÇÃO ---
+# (O callback do Toggler foi removido, o que está correto para o modo desktop)
 
 
 # ==============================================================================
