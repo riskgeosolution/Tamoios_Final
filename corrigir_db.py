@@ -1,4 +1,4 @@
-# corrigir_db.py (Script SEGURO para limpar duplicatas sem perder dados)
+# corrigir_db.py (CORRIGIDO v2 - Força a desconexão do engine)
 
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -8,7 +8,7 @@ import os
 import sys
 import shutil  # Para fazer backup
 
-print("--- INICIANDO CORREÇÃO DE DUPLICATAS (v1) ---")
+print("--- INICIANDO CORREÇÃO DE DUPLICATAS (v2) ---")
 print("Este script preserva TODOS os dados históricos.")
 
 try:
@@ -29,6 +29,8 @@ db_wal = db_path + "-wal"
 # --- 1. Verificar se o DB existe ---
 if not os.path.exists(db_path):
     print(f"ERRO: Banco de dados '{db_path}' não encontrado. Nada para corrigir.")
+    print("Se você já rodou e falhou, restaure o .backup primeiro.")
+    print("Ex: mv /var/data/temp_local_db.db.backup /var/data/temp_local_db.db")
     sys.exit()
 
 print(f"Encontrado banco de dados: {db_path}")
@@ -48,7 +50,6 @@ try:
     print(f"Total de {len(df_completo)} linhas lidas.")
 
     # --- 3. Limpar duplicatas na memória ---
-    # Mantém a 'última' ocorrência de uma duplicata
     df_limpo = df_completo.drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last')
 
     num_removidas = len(df_completo) - len(df_limpo)
@@ -58,6 +59,12 @@ try:
         print("LIMPEZA: Nenhuma duplicata encontrada.")
 
     print(f"Total de {len(df_limpo)} linhas únicas restantes.")
+
+    # --- INÍCIO DA CORREÇÃO ---
+    # 3.5. Força a desconexão do banco de dados antigo
+    print("Desconectando do banco de dados antigo...")
+    engine.dispose()
+    # --- FIM DA CORREÇÃO ---
 
     # --- 4. Fazer Backup (Segurança) ---
     print(f"Criando backup do banco antigo em: {db_backup_path}")
@@ -69,8 +76,13 @@ try:
     if os.path.exists(db_shm): os.remove(db_shm)
     if os.path.exists(db_wal): os.remove(db_wal)
 
-    # --- 6. Criar a nova tabela com a trava UNIQUE ---
-    # Usamos os nomes exatos de COLUNAS_HISTORICO
+    # --- INÍCIO DA CORREÇÃO ---
+    # 6. Criar um NOVO engine (após o arquivo ser apagado)
+    print("Conectando ao novo arquivo de banco de dados...")
+    engine_novo = data_source.get_engine()
+    # --- FIM DA CORREÇÃO ---
+
+    # 6.5 Criar a nova tabela com a trava UNIQUE
     create_table_sql = f"""
     CREATE TABLE {config.DB_TABLE_NAME} (
         "timestamp" TIMESTAMP,
@@ -88,19 +100,22 @@ try:
     """
 
     print("Criando nova tabela no SQLite com a restrição UNIQUE(id_ponto, timestamp)...")
-    with engine.connect() as connection:
+    # --- INÍCIO DA CORREÇÃO ---
+    with engine_novo.connect() as connection:  # Usa o NOVO engine
+        # --- FIM DA CORREÇÃO ---
         connection.execute(text(create_table_sql))
 
     # --- 7. Salvar os dados limpos no novo banco ---
     print(f"Salvando as {len(df_limpo)} linhas limpas no novo banco de dados...")
 
-    # Garantir que apenas as colunas certas sejam salvas
     df_para_salvar = df_limpo[data_source.COLUNAS_HISTORICO]
 
     df_para_salvar.to_sql(
         config.DB_TABLE_NAME,
-        engine,
-        if_exists='append',  # 'append' na tabela nova e vazia
+        # --- INÍCIO DA CORREÇÃO ---
+        engine_novo,  # Usa o NOVO engine
+        # --- FIM DA CORREÇÃO ---
+        if_exists='append',
         index=False
     )
 
