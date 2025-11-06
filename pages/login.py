@@ -1,9 +1,10 @@
-# pages/login.py (CORRIGIDO: Texto do título alterado)
+# pages/login.py (CORRIGIDO: Adicionado copyright dinâmico e "Todos os direitos reservados")
 
 import dash
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 from app import app
+import datetime  # <--- NOVO IMPORT PARA PEGAR O ANO ATUAL
 
 
 def get_layout():
@@ -13,26 +14,21 @@ def get_layout():
     logo_riskgeo_path = app.get_asset_url('LogoMarca RiskGeo Solutions.png')
     logo_tamoios_path = app.get_asset_url('tamoios.png')
 
-    # --- NOVO: Obtém o caminho do fundo para CSS Inline ---
     fundo_path = app.get_asset_url('tamoios_fundo.png')
-    # --- FIM DA ALTERAÇÃO ---
 
     # Altura reduzida dos logos (Mantido)
     nova_altura_logo = "90px"
 
-    # --- NOVO: Estilo de fundo Inline ---
     style_fundo = {
         'backgroundImage': f"url('{fundo_path}')",
         'backgroundSize': 'cover',
         'backgroundPosition': 'center',
         'backgroundRepeat': 'no-repeat'
     }
-    # --- FIM DA ALTERAÇÃO ---
 
     layout = dbc.Container([
         dbc.Row(
             dbc.Col(
-                # --- INÍCIO DA ALTERAÇÃO: Adicionado estilo de transparência ao Card ---
                 dbc.Card([
                     dbc.CardBody([
                         # --- Logos Lado a Lado (Espaçados) ---
@@ -53,11 +49,8 @@ def get_layout():
                             justify="around",
                             className="mb-4 pt-3"
                         ),
-                        # --- FIM DA ALTERAÇÃO ---
 
-                        # --- INÍCIO DA ALTERAÇÃO DO TÍTULO ---
                         html.H4("Sistema de Monitoramento Geoambiental", className="card-title text-center mb-4"),
-                        # --- FIM DA ALTERAÇÃO DO TÍTULO ---
 
                         # Mensagem de erro (inicialmente vazia)
                         html.Div(id='login-error-output', className="text-danger mb-3 text-center"),
@@ -77,7 +70,6 @@ def get_layout():
                             justify="center",
                             className="mb-4"
                         ),
-                        # --- FIM DA ALTERAÇÃO ---
 
                         # --- Botão Acessar (Mantido) ---
                         dbc.Row(
@@ -93,11 +85,17 @@ def get_layout():
                             ),
                             justify="center",
                             className="mb-3"
+                        ),
+
+                        # --- INÍCIO DA ALTERAÇÃO (Copyright Dinâmico) ---
+                        html.P(
+                            f"© {datetime.datetime.now().year} RiskGeo Solutions Engenharia e Consultoria Ltda. Todos os direitos reservados.",
+                            className="text-center text-muted small mt-3 mb-0"
                         )
-                        # --- FIM DA ALTERAÇÃO DO BOTÃO ---
+                        # --- FIM DA ALTERAÇÃO ---
+
                     ])
-                ], style={'backgroundColor': 'rgba(255, 255, 255, 0.8)'}),  # <<<< AQUI ESTÁ A ALTERAÇÃO
-                # --- FIM DA ALTERAÇÃO ---
+                ], style={'backgroundColor': 'rgba(255, 255, 255, 0.8)'}),
 
                 width=12, md=10, lg=8
             ),
