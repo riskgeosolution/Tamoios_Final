@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO: Lógica da Query SQL para < end_dt)
+# data_source.py (CORRIGIDO: Adiciona detecção de "stale data" para hardware offline)
 
 import pandas as pd
 import json
@@ -127,12 +127,10 @@ def read_data_from_sqlite(id_ponto, start_dt, end_dt):
     print(f"[SQLite] Consultando dados para {id_ponto} de {start_dt} a {end_dt}")
     engine = get_engine()
 
-    # Usa strftime para garantir o formato 'YYYY-MM-DD HH:MM:SS' (com espaço)
     start_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
     end_str = end_dt.strftime('%Y-%m-%d %H:%M:%S')
 
-    # --- INÍCIO DA CORREÇÃO (Query SQL) ---
-    # Trocamos <= :end por < :end
+    # Query corrigida (usa < end)
     query = f"""
         SELECT * FROM {DB_TABLE_NAME}
         WHERE id_ponto = :ponto
@@ -140,7 +138,6 @@ def read_data_from_sqlite(id_ponto, start_dt, end_dt):
         AND timestamp < :end
         ORDER BY timestamp ASC
     """
-    # --- FIM DA CORREÇÃO ---
 
     try:
         df = pd.read_sql_query(
@@ -296,9 +293,7 @@ def arredondar_timestamp_15min(ts_epoch):
 
 
 def fetch_data_from_weatherlink_api(df_historico):
-    # --- INÍCIO DA CORREÇÃO (Importação Circular) ---
     import processamento
-    # --- FIM DA CORREÇÃO ---
 
     WEATHERLINK_API_ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
     logs_api = []
@@ -358,9 +353,25 @@ def fetch_data_from_weatherlink_api(df_historico):
                 ts_do_sensor = sensor_principal.get('ts')
 
                 if ts_do_sensor is None:
-                    mensagem_log = "API: ERRO. Sensor não retornou um carimbo 'ts'. Usando hora local."
+                    mensagem_log = "API: ERRO. Sensor não retornou um carimbo 'ts'. Ponto ignorado."
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
-                    ts_do_sensor = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                    continue
+
+                # --- INÍCIO DA CORREÇÃO (Hardware Offline / Stale Data) ---
+                # 't' é o timestamp UTC de quando a requisição foi feita (em segundos)
+                # 'ts_do_sensor' é o timestamp de quando a *estação* fez a leitura (em segundos)
+                STALE_DATA_THRESHOLD_SECONDS = 20 * 60  # 20 minutos (mesma tolerância do gap-check)
+                data_staleness_seconds = t - ts_do_sensor
+
+                if data_staleness_seconds > STALE_DATA_THRESHOLD_SECONDS:
+                    # Se os dados do sensor são mais velhos que 20 minutos, a estação está offline.
+                    mensagem_log = f"AVISO API: Estação {id_ponto} está offline. Dados com {data_staleness_seconds // 60:.0f} min de atraso. Ignorando este ponto (será preenchido pelo backfill)."
+                    logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
+
+                    # Ao 'continuar', nós NÃO salvamos o dado 0.0.
+                    # Isso CRIA o "gap" que o index.py irá detectar e corrigir.
+                    continue
+                # --- FIM DA CORREÇÃO ---
 
                 timestamp_arredondado = arredondar_timestamp_15min(ts_do_sensor)
 
@@ -406,7 +417,7 @@ def fetch_data_from_weatherlink_api(df_historico):
     return pd.DataFrame(dados_processados), status_calculados, logs_api
 
 
-def backfill_km67_pro_data(df_historico_existente):  # <- O argumento está aqui
+def backfill_km67_pro_data(df_historico_existente):
     id_ponto = "Ponto-A-KM67"
     station_config = WEATHERLINK_CONFIG[id_ponto]
     station_id = station_config['STATION_ID']
