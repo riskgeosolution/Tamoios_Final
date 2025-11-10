@@ -132,7 +132,7 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
         pdf.ln()
 
     # --- 6. Finalização e Retorno ---
-    buffer_output = pdf.output(dest='S')
+    buffer_output = pdf.output()
     return buffer_output
 
 
@@ -152,8 +152,10 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     pdf.ln(5)
     pdf.set_font("Courier", size=8)
     for log_str in reversed(logs_filtrados):
+        # Sanitiza a string para evitar erros de codificação
+        log_str_sanitizado = log_str.encode('latin-1', 'replace').decode('latin-1')
         try:
-            parts = log_str.split('|')
+            parts = log_str_sanitizado.split('|')
             timestamp_str_utc_iso = parts[0].strip()
             ponto_str = parts[1].strip()
             msg_str = "|".join(parts[2:]).strip()
@@ -172,12 +174,14 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
                 cor = (0, 0, 200)
             pdf.set_text_color(*cor)
             linha = f"[{timestamp_formatado}] {ponto_str}: {msg_str}"
-            pdf.multi_cell(0, 4, linha)
+            pdf.write(5, linha)
+            pdf.ln()
         except Exception:
             pdf.set_text_color(0, 0, 0)
-            pdf.multi_cell(0, 4, log_str)
+            pdf.write(5, log_str_sanitizado)
+            pdf.ln()
     pdf.set_text_color(0, 0, 0)
-    buffer_output = pdf.output(dest='S')
+    buffer_output = pdf.output()
     return buffer_output
 
 
