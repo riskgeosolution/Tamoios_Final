@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM CORREÇÃO DEFINITIVA DO LOOP)
+# index.py (COMPLETO, CORREÇÃO DEFINITIVA v3)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -82,7 +82,7 @@ def worker_main_loop():
 
         # --- LÓGICA DE BACKFILL (GAP CHECK) ---
 
-        # A. Backfill Chuva KM 67
+        # A. Backfill Chuva KM 67 (Plano Pro)
         df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
         run_backfill_km67 = False
 
@@ -103,159 +103,43 @@ def worker_main_loop():
             except Exception as e_gap:
                 print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 67): {e_gap}. Pulando backfill.")
 
-        # B. Backfill Umidade KM 72
-        df_km72 = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
-        run_backfill_km72 = False
-
-        if df_km72.empty or df_km72['umidade_1m_perc'].isnull().all():
-            print("[Worker Thread] Histórico de Umidade do KM 72 está vazio. Tentando backfill de 72h...")
-            run_backfill_km72 = True
-        else:
+        if run_backfill_km67:
             try:
-                if not pd.api.types.is_datetime64_any_dtype(df_km72['timestamp']):
-                    df_km72.loc[:, 'timestamp'] = pd.to_datetime(df_km72['timestamp'])
+                data_source.backfill_km67_pro_data(historico_df)
+                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
+                print(f"[Worker Thread] Backfill KM 67 concluído.")
+            except Exception as e_backfill:
+                data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
 
-                latest_timestamp_umidade = df_km72.dropna(subset=['umidade_1m_perc'])['timestamp'].max()
+        # --- FIM DO BACKFILL KM 67 ---
 
-                if pd.isna(latest_timestamp_umidade):
-                    print(
-                        "[Worker Thread] Histórico de Umidade do KM 72 (coluna existe) está vazio. Tentando backfill...")
-                    run_backfill_km72 = True
-                else:
-                    agora_utc = datetime.datetime.now(datetime.timezone.utc)
-                    gap_segundos = (agora_utc - latest_timestamp_umidade).total_seconds()
-                    if gap_segundos > (20 * 60):
-                        print(
-                            f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para a Umidade KM 72. Tentando backfill...")
-                        run_backfill_km72 = True
-            except Exception as e_gap_km72:
-                print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 72): {e_gap_km72}. Pulando backfill.")
+        # --- INÍCIO DA CORREÇÃO (LÓGICA SIMPLIFICADA) ---
 
-        # --- INÍCIO DA CORREÇÃO (Quebra do "Loop da Morte") ---
+        # 1. COLETAR CHUVA (WeatherLink)
+        # Isso salva a linha atual (ex: 12:30) com dados de chuva e umidade NaN.
+        novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
-        dados_umidade_km72_inc = None  # Inicializa como None
+        # Recarrega o histórico (que agora contém a linha de chuva 12:30)
+        historico_df, _, _ = data_source.get_all_data_from_disk()
 
-        # SE HÁ UM GAP, o ciclo é SÓ de backfill.
-        if run_backfill_km67 or run_backfill_km72:
-            print("[Worker Thread] GAPs detectados. Executando ciclo de Backfill.")
-            if run_backfill_km67:
-                try:
-                    data_source.backfill_km67_pro_data(historico_df)
-                    print(f"[Worker Thread] Backfill KM 67 concluído.")
-                except Exception as e_backfill:
-                    data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
+        # 2. COLETAR/MESCLAR UMIDADE (Zentra)
+        # Rodamos o backfill (4 dias) A CADA CICLO.
+        # A função backfill_zentra_km72_data JÁ busca os dados mais recentes E
+        # usa a lógica "groupby.max()" para mesclar com a linha de chuva que acabamos de salvar.
+        try:
+            print("[Worker Thread] Executando Backfill/Merge de Umidade Zentra...")
+            data_source.backfill_zentra_km72_data(historico_df)
+            historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF mesclado
+            print(f"[Worker Thread] Backfill/Merge Umidade KM 72 concluído.")
+        except Exception as e_backfill_km72:
+            data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
 
-            if run_backfill_km72:
-                try:
-                    data_source.backfill_zentra_km72_data(historico_df)
-                    print(f"[Worker Thread] Backfill Umidade KM 72 concluído.")
-                except Exception as e_backfill_km72:
-                    data_source.adicionar_log(ID_PONTO_ZENTRA_KM72,
-                                              f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
-
-            # Recarrega o histórico após os backfills
-            historico_df, _, _ = data_source.get_all_data_from_disk()
-            print("[Worker Thread] Backfills concluídos. Coletas incrementais serão puladas neste ciclo.")
-
-        # SE NÃO HÁ GAPS, o ciclo é SÓ incremental.
-        else:
-            print("[Worker Thread] Sem gaps. Executando ciclo incremental normal.")
-            # 2. COLETAR NOVOS DADOS DA API (passo /current)
-            # Primeiro a WeatherLink (chuva)
-            novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
-
-            # SEGUNDO: Coleta incremental da Zentra (Umidade)
-            dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+        # 3. (REMOVIDO) Não há mais coleta incremental.
+        # 4. (REMOVIDO) Não há mais lógica de anexação de base (o backfill lida com isso se for preciso).
 
         # --- FIM DA CORREÇÃO ---
 
-        # --- LÓGICA DE BASE DINÂMICA (Trava 6h) ---
-        if dados_umidade_km72_inc:
-            # Recarrega o histórico (que agora inclui a linha da WeatherLink)
-            historico_df, _, _ = data_source.get_all_data_from_disk()
-            df_km72_hist = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72].copy()
-
-            # Garante que o timestamp está em formato datetime para o processamento
-            if not df_km72_hist.empty:
-                df_km72_hist['timestamp'] = pd.to_datetime(df_km72_hist['timestamp'])
-
-            if not df_km72_hist.empty:
-
-                # 1. Encontrar a base anterior
-                df_bases_validas = df_km72_hist.dropna(subset=['base_1m', 'base_2m', 'base_3m'])
-
-                if df_bases_validas.empty:
-                    print("[Worker] Primeiro run ou bases nulas. Usando valores estáticos do config.")
-                    old_base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
-                    old_base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
-                    old_base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
-                else:
-                    ultimo_dado_base = df_bases_validas.sort_values('timestamp').iloc[-1]
-                    old_base_1m = ultimo_dado_base['base_1m']
-                    old_base_2m = ultimo_dado_base['base_2m']
-                    old_base_3m = ultimo_dado_base['base_3m']
-
-                # 2. Preparar os novos dados
-                novos_dados_para_salvar = {}
-
-                # Sensor 1m
-                new_sensor_1m = dados_umidade_km72_inc.get('umidade_1m_perc')
-                if new_sensor_1m is not None:
-                    novos_dados_para_salvar['umidade_1m_perc'] = new_sensor_1m
-                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
-                    new_base_1m = processamento.verificar_trava_base(
-                        df_km72_hist, 'umidade_1m_perc', new_sensor_1m, old_base_1m, horas=6
-                    )
-                    novos_dados_para_salvar['base_1m'] = new_base_1m
-
-                # Sensor 2m
-                new_sensor_2m = dados_umidade_km72_inc.get('umidade_2m_perc')
-                if new_sensor_2m is not None:
-                    novos_dados_para_salvar['umidade_2m_perc'] = new_sensor_2m
-                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
-                    new_base_2m = processamento.verificar_trava_base(
-                        df_km72_hist, 'umidade_2m_perc', new_sensor_2m, old_base_2m, horas=6
-                    )
-                    novos_dados_para_salvar['base_2m'] = new_base_2m
-
-                # Sensor 3m
-                new_sensor_3m = dados_umidade_km72_inc.get('umidade_3m_perc')
-                if new_sensor_3m is not None:
-                    novos_dados_para_salvar['umidade_3m_perc'] = new_sensor_3m
-                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
-                    new_base_3m = processamento.verificar_trava_base(
-                        df_km72_hist, 'umidade_3m_perc', new_sensor_3m, old_base_3m, horas=6
-                    )
-                    novos_dados_para_salvar['base_3m'] = new_base_3m
-
-                # 3. Encontrar a linha para atualizar
-                ts_recente = df_km72_hist['timestamp'].max()
-                idx_list = historico_df.index[
-                    (historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72) &
-                    (historico_df['timestamp'] == ts_recente)
-                    ].tolist()
-
-                if idx_list:
-                    idx = idx_list[0]
-                    # Anexa os dados (sensor E base) no DF em memória
-                    for coluna, valor in novos_dados_para_salvar.items():
-                        historico_df.at[idx, coluna] = valor
-
-                    print(
-                        f"[Worker] Dados Zentra (Incremental) e Bases Dinâmicas (Trava 6h) anexadas ao Ponto {ID_PONTO_ZENTRA_KM72}.")
-                    # (O log de mudança de base agora está dentro da função 'verificar_trava_base')
-
-                    # Salva o DF atualizado
-                    data_source.save_historico_to_csv(historico_df)
-                    # (O SQLite será atualizado no próximo ciclo de backfill se houver gap)
-                else:
-                    print(
-                        f"[Worker] Aviso: Zentra retornou dados, mas não encontrou a linha de timestamp mais recente para {ID_PONTO_ZENTRA_KM72}.")
-
-        # --- FIM DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA) ---
-
         # 3. RECARREGAR O HISTÓRICO COMPLETO (FINAL)
-        # (O historico_df em memória já foi atualizado, então podemos usá-lo)
         historico_completo = historico_df.copy()
 
         if historico_completo.empty:
@@ -281,24 +165,26 @@ def worker_main_loop():
 
                 if not df_ponto.empty:
                     try:
-                        ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
+                        # --- INÍCIO DA CORREÇÃO (Cálculo da Base) ---
+                        # A base agora é calculada usando o histórico completo do ponto
 
-                        # --- INÍCIO DA ALTERAÇÃO (USAR BASE DINÂMICA) ---
+                        df_ponto_umidade = df_ponto.dropna(
+                            subset=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
 
-                        # A base agora vem do 'ultimo_dado', não do 'config'
-                        base_1m = ultimo_dado.get('base_1m')
-                        base_2m = ultimo_dado.get('base_2m')
-                        base_3m = ultimo_dado.get('base_3m')
-
-                        # Fallback (essencial para o primeiro run e para os KMs sem Zentra)
-                        if pd.isna(base_1m):
+                        if df_ponto_umidade.empty:
+                            # Usa o padrão se não houver dados de umidade
                             base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
-                        if pd.isna(base_2m):
                             base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
-                        if pd.isna(base_3m):
                             base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
+                        else:
+                            # A base é o valor MÍNIMO (o mais seco) já registrado
+                            base_1m = df_ponto_umidade['umidade_1m_perc'].min()
+                            base_2m = df_ponto_umidade['umidade_2m_perc'].min()
+                            base_3m = df_ponto_umidade['umidade_3m_perc'].min()
 
-                        # --- FIM DA ALTERAÇÃO ---
+                        # Pega o último dado válido
+                        ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
+                        # --- FIM DA CORREÇÃO (Cálculo da Base) ---
 
                         status_umidade_tuple = processamento.definir_status_umidade_hierarquico(
                             ultimo_dado.get('umidade_1m_perc'),
