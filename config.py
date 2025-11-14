@@ -1,4 +1,4 @@
-# config.py (COMPLETO, COM NOVOS VALORES BASE DE UMIDADE)
+# config.py (COMPLETO, COM NOVOS VALORES BASE E CONSTANTES DE COR)
 
 import os
 import datetime
@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Configurações da API Real (WeatherLink) ---
-# ... (seção WeatherLink mantida igual) ...
 MAPEAMENTO_API_IDS = {
     "ID_DA_SUA_API_KM67": "Ponto-A-KM67",
     "ID_DA_SUA_API_KM72": "Ponto-B-KM72",
@@ -42,7 +41,6 @@ WEATHERLINK_CONFIG = {
 
 
 # --- INÍCIO DA SEÇÃO (ZENTRA CLOUD) ---
-# ... (seção Zentra mantida igual) ...
 ZENTRA_API_TOKEN = os.getenv("ZENTRA_API_TOKEN", "a6483331a7e3fd1920483a61eb9524a51298be9b")
 ZENTRA_STATION_SERIAL = os.getenv("ZENTRA_STATION_SERIAL", "z6-32707")
 ZENTRA_BASE_URL = "https://zentracloud.com/api/v4"
@@ -56,31 +54,24 @@ ID_PONTO_ZENTRA_KM72 = "Ponto-B-KM72"
 
 
 # --- CONFIGURAÇÕES DO BANCO DE DADOS ---
-# ... (seção DB mantida igual) ...
 DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
 DB_TABLE_NAME = "historico_monitoramento"
 # --- FIM DA CONFIGURAÇÃO DB ---
 
 
 # --- Configurações do Worker ---
-# ... (seção Worker mantida igual) ...
 FREQUENCIA_API_SEGUNDOS = 60 * 15
 MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS
 
 # --- Configurações dos Pontos de Análise ---
-
-# --- INÍCIO DA ALTERAÇÃO (NOVOS VALORES BASE) ---
 CONSTANTES_PADRAO = {
-    "UMIDADE_BASE_1M": 39.0,  # Era 30.0
-    "UMIDADE_BASE_2M": 43.0,  # Era 36.0
-    "UMIDADE_BASE_3M": 10.0,  # Era 39.0
-
-    # (Valores de Saturação mantidos)
+    "UMIDADE_BASE_1M": 39.0,
+    "UMIDADE_BASE_2M": 43.0,
+    "UMIDADE_BASE_3M": 10.0,
     "UMIDADE_SATURACAO_1M": 47.0,
     "UMIDADE_SATURACAO_2M": 46.0,
     "UMIDADE_SATURACAO_3M": 49.0,
 }
-# --- FIM DA ALTERAÇÃO ---
 
 PONTOS_DE_ANALISE = {
     "Ponto-A-KM67": {"nome": "KM 67", "constantes": CONSTANTES_PADRAO.copy(), "lat_lon": [-23.585137, -45.456733]},
@@ -90,7 +81,6 @@ PONTOS_DE_ANALISE = {
 }
 
 # --- Regras de Negócio (Alertas) ---
-# ... (seção Regras mantida igual) ...
 CHUVA_LIMITE_VERDE = 60.0
 CHUVA_LIMITE_AMARELO = 79.0
 CHUVA_LIMITE_LARANJA = 100.0
@@ -113,4 +103,19 @@ STATUS_MAP_HIERARQUICO = {
     1: ("ATENÇÃO", "warning", "bg-warning"),
     0: ("LIVRE", "success", "bg-success"),
     -1: ("SEM DADOS", "secondary", "bg-secondary")
+}
+
+# --- CONSTANTES DE CORES (CENTRALIZADAS) ---
+CORES_ALERTAS_CSS = {
+    "verde": "green",
+    "amarelo": "#FFD700",
+    "laranja": "#fd7e14",
+    "vermelho": "#dc3545",
+    "cinza": "grey"
+}
+
+CORES_UMIDADE = {
+    '1m': CORES_ALERTAS_CSS["verde"],
+    '2m': CORES_ALERTAS_CSS["amarelo"],
+    '3m': CORES_ALERTAS_CSS["vermelho"]
 }

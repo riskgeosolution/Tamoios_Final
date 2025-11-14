@@ -1,4 +1,4 @@
-# pages/specific_dash.py (COMPLETO, CORRIGINDO SYNTAXERROR)
+# pages/specific_dash.py (COMPLETO, CORRIGIDO)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -20,11 +20,13 @@ from threading import Thread
 # Configura o Matplotlib (Mantido)
 plt.switch_backend('Agg')
 
-# --- IMPORTAÇÕES (Mantidas) ---
+# --- IMPORTAÇÕES (CORRIGIDAS) ---
 from app import app, TEMPLATE_GRAFICO_MODERNO
 from config import (
     PONTOS_DE_ANALISE, CONSTANTES_PADRAO, FREQUENCIA_API_SEGUNDOS,
-    RISCO_MAP, STATUS_MAP_HIERARQUICO
+    RISCO_MAP, STATUS_MAP_HIERARQUICO,
+    # --- NOVA IMPORTAÇÃO ---
+    CORES_UMIDADE, DELTA_TRIGGER_UMIDADE
 )
 import processamento
 import gerador_pdf
@@ -34,19 +36,7 @@ import data_source
 from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
 
 
-# --- Mapas de Cores (Mantidos) ---
-CORES_ALERTAS_CSS = {
-    "verde": "green",
-    "amarelo": "#FFD700",
-    "laranja": "#fd7e14",
-    "vermelho": "#dc3545",
-    "cinza": "grey"
-}
-CORES_UMIDADE = {
-    '1m': CORES_ALERTAS_CSS["verde"],
-    '2m': CORES_ALERTAS_CSS["amarelo"],
-    '3m': CORES_ALERTAS_CSS["vermelho"]
-}
+# --- Mapas de Cores (REMOVIDOS DAQUI, AGORA EM CONFIG.PY) ---
 
 
 # --- Layout da Página Específica ---
@@ -154,7 +144,6 @@ def get_layout():
     Output('specific-dash-title', 'children'),
     Input('url-raiz', 'pathname')
 )
-# ... (restante do código até o fim do arquivo) ...
 def update_specific_title(pathname):
     if not pathname.startswith('/ponto/'):
         return dash.no_update
@@ -182,7 +171,6 @@ def update_specific_title(pathname):
     ]
 )
 def update_specific_dashboard(pathname, dados_json, status_json, selected_hours):
-    # (Esta função não foi alterada)
     if not dados_json or not status_json or not pathname.startswith('/ponto/') or selected_hours is None:
         return dash.no_update, dash.no_update, dash.no_update
     id_ponto = ""
@@ -233,7 +221,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
         ultima_chuva_72h = df_chuva_72h_completo.iloc[-1]['chuva_mm'] if not df_chuva_72h_completo.empty else 0.0
         ultima_chuva_72h = ultima_chuva_72h if not pd.isna(ultima_chuva_72h) else 0.0
-        from config import DELTA_TRIGGER_UMIDADE
+        
         css_color_s1 = CORES_UMIDADE['1m'] if (ultimo_dado.get('umidade_1m_perc',
                                                                base_1m) - base_1m) >= DELTA_TRIGGER_UMIDADE else 'green'
         css_color_s2 = CORES_UMIDADE['2m'] if (ultimo_dado.get('umidade_2m_perc',
