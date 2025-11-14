@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM CORREÇÃO DE API DUPLA)
+# index.py (COMPLETO, COM CORREÇÃO DE API DUPLA v2)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -82,8 +82,7 @@ def worker_main_loop():
 
         # --- LÓGICA DE BACKFILL (GAP CHECK) ---
 
-        # A. Backfill Chuva KM 67 (Como antes)
-        # ... (Esta secção permanece EXATAMENTE IGUAL) ...
+        # A. Backfill Chuva KM 67
         df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
         run_backfill_km67 = False
 
@@ -112,8 +111,7 @@ def worker_main_loop():
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
 
-        # B. Backfill Umidade KM 72 (Como antes)
-        # ... (Esta secção permanece EXATAMENTE IGUAL) ...
+        # B. Backfill Umidade KM 72
         df_km72 = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
         run_backfill_km72 = False
 
@@ -162,6 +160,7 @@ def worker_main_loop():
 
         # --- INÍCIO DA CORREÇÃO (Removida a trava "if not run_backfill_km72") ---
         # A coleta incremental de umidade DEVE rodar para preencher a linha de chuva atual
+        print("[Worker Thread] Executando coleta incremental Zentra...")
         dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
         # --- FIM DA CORREÇÃO ---
 
@@ -319,7 +318,7 @@ def worker_main_loop():
                 risco_umidade = RISCO_MAP.get(status_umidade_txt, -1)
 
                 status_final_txt = status_chuva_txt
-                if risco_umidade > risco_chuva:
+                if risco_umidade > risco_umidade:
                     status_final_txt = status_umidade_txt
 
                 status_atualizado[id_ponto] = status_final_txt

@@ -184,7 +184,14 @@ def save_historico_to_csv(df):
         # Esta é a lógica central anti-duplicação
         # Agrupa por ponto/timestamp e pega o valor máximo (NaN < 0.0 < 39.5)
         # Isso mescla (13:15, 0.0, NaN) e (13:15, NaN, 39.5) em (13:15, 0.0, 39.5)
-        df_agrupado = df.groupby(['id_ponto', 'timestamp']).max().reset_index()
+
+        # Garante que as colunas corretas existam ANTES de agrupar
+        df_para_agrupar = df.copy()
+        for col in COLUNAS_HISTORICO:
+            if col not in df_para_agrupar.columns:
+                df_para_agrupar[col] = pd.NA
+
+        df_agrupado = df_para_agrupar.groupby(['id_ponto', 'timestamp']).max().reset_index()
         # --- FIM DA CORREÇÃO ---
 
         df_sem_duplicatas = df_agrupado.sort_values(by='timestamp')
@@ -720,14 +727,15 @@ def backfill_zentra_km72_data(df_historico_existente):
         # 1. Concatena o histórico existente (chuva) com o backfill (umidade)
         df_combinado = pd.concat([df_historico_existente, df_backfill_zentra], ignore_index=True)
 
-        # 2. Garante que as colunas corretas existam
+        # 2. Garante que as colunas corretas existam ANTES de agrupar
+        df_para_agrupar = df_combinado.copy()
         for col in COLUNAS_HISTORICO:
-            if col not in df_combinado.columns:
-                df_combinado[col] = pd.NA
+            if col not in df_para_agrupar.columns:
+                df_para_agrupar[col] = pd.NA
 
         # 3. Agrupa por ponto/timestamp e pega o valor MÁXIMO (ex: 39.5 vence NaN, 0.0 vence NaN)
         # Esta é a lógica de mesclagem mais segura e à prova de duplicatas.
-        df_agrupado = df_combinado.groupby(['id_ponto', 'timestamp']).max().reset_index()
+        df_agrupado = df_para_agrupar.groupby(['id_ponto', 'timestamp']).max().reset_index()
 
         # 4. Salva o CSV final mesclado e sem duplicatas
         save_historico_to_csv(df_agrupado)
@@ -821,7 +829,13 @@ def backfill_km67_pro_data(df_historico_existente):
 
         # --- INÍCIO DA CORREÇÃO: Mesclagem Robusta com Concat + Groupby.max() ---
         df_combinado = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
-        df_agrupado = df_combinado.groupby(['id_ponto', 'timestamp']).max().reset_index()
+
+        df_para_agrupar = df_combinado.copy()
+        for col in COLUNAS_HISTORICO:
+            if col not in df_para_agrupar.columns:
+                df_para_agrupar[col] = pd.NA
+
+        df_agrupado = df_para_agrupar.groupby(['id_ponto', 'timestamp']).max().reset_index()
         save_historico_to_csv(df_agrupado)
         # --- FIM DA CORREÇÃO ---
 
