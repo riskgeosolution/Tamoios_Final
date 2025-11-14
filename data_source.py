@@ -1,3 +1,5 @@
+# data_source.py (COMPLETO E CORRIGIDO)
+
 import pandas as pd
 import json
 import os
@@ -584,15 +586,17 @@ def backfill_zentra_km72_data(df_historico_existente):
     # Data final da busca: Agora
     end_date = datetime.datetime.now(datetime.timezone.utc)
 
-    # Padrão: 4 dias atrás (para garantir 72h de backfill)
-    default_start_date = end_date - datetime.timedelta(days=4)
+    # --- INÍCIO DA ALTERAÇÃO (Linha ~679) ---
+    # Padrão: 1 dia atrás (para garantir o preenchimento incremental sem estourar a API)
+    default_start_date = end_date - datetime.timedelta(days=1)
+    # --- FIM DA ALTERAÇÃO ---
 
     if latest_ts is None or latest_ts < INSTALL_DATE_KM72:
         # Primeira execução, ou dados perdidos/muito antigos: Começar da instalação (backfill completo)
         start_date = INSTALL_DATE_KM72
         print(f"[API Zentra Backfill] DETECTADO BACKFILL INICIAL/COMPLETO. Iniciando de {INSTALL_DATE_KM72.date()}.")
     else:
-        # Execução normal: Apenas backfill de 4 dias para garantir o preenchimento incremental.
+        # Execução normal: Apenas backfill de 1 dia para garantir o preenchimento incremental.
         start_date = default_start_date
         print(f"[API Zentra Backfill] DETECTADO BACKFILL INCREMENTAL. Iniciando de {default_start_date.date()}.")
 
