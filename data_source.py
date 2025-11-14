@@ -1,5 +1,3 @@
-# data_source.py (COMPLETO, COM BACKFILL DA ZENTRA)
-
 import pandas as pd
 import json
 import os
@@ -100,7 +98,6 @@ def save_to_sqlite(df_novos_dados):
 
 
 def migrate_csv_to_sqlite_initial():
-    # ... (Esta função permanece igual) ...
     engine = get_engine()
     inspector = inspect(engine)
     try:
@@ -129,7 +126,6 @@ def migrate_csv_to_sqlite_initial():
 
 
 def read_data_from_sqlite(id_ponto, start_dt, end_dt):
-    # ... (Esta função permanece igual) ...
     print(f"[SQLite] Consultando dados para {id_ponto} de {start_dt} a {end_dt}")
     engine = get_engine()
 
@@ -163,7 +159,6 @@ def read_data_from_sqlite(id_ponto, start_dt, end_dt):
 # ==========================================================
 
 def read_historico_from_csv():
-    # ... (Esta função permanece igual) ...
     try:
         historico_df = pd.read_csv(HISTORICO_FILE_CSV, sep=',')
         if 'timestamp' in historico_df.columns:
@@ -183,7 +178,6 @@ def read_historico_from_csv():
 
 
 def save_historico_to_csv(df):
-    # ... (Esta função permanece igual) ...
     try:
         df_sem_duplicatas = df.sort_values(by='timestamp').drop_duplicates(
             subset=['id_ponto', 'timestamp'], keep='last')
@@ -204,7 +198,6 @@ def save_historico_to_csv(df):
 # ==========================================================
 
 def get_all_data_from_disk():
-    # ... (Esta função permanece igual) ...
     historico_df = read_historico_from_csv()
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
@@ -225,17 +218,13 @@ def get_all_data_from_disk():
 
 
 # ==========================================================
-# --- FUNÇÕES USADAS PELO WORKER.PY (ALTERADA) ---
+# --- FUNÇÕES USADAS PELO WORKER.PY ---
 # ==========================================================
 
 def executar_passo_api_e_salvar(historico_df_csv):
     try:
-        # 1. Coleta dados de CHUVA (WeatherLink) - Como antes
+        # 1. Coleta dados de CHUVA (WeatherLink)
         dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api(historico_df_csv)
-
-        # --- ALTERAÇÃO: A coleta de Zentra incremental (fetch_data_from_zentra_cloud)
-        # --- foi MOVIDA para o index.py, para rodar *depois* do backfill.
-        # --- Esta função agora só coleta dados da WeatherLink.
 
         for log in logs_api:
             mensagem_log_completa = f"| {log['id_ponto']} | {log['mensagem']}"
@@ -267,6 +256,7 @@ def executar_passo_api_e_salvar(historico_df_csv):
         save_to_sqlite(dados_api_df)
 
         historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
+        # Salva no CSV usando a lógica de desduplicação (o worker.py irá re-mesclar a umidade)
         save_historico_to_csv(historico_atualizado_df_csv)
 
         return dados_api_df, status_novos
@@ -281,7 +271,6 @@ def executar_passo_api_e_salvar(historico_df_csv):
 # --- FUNÇÕES DE ASSINATURA E COLETA de API (WeatherLink) ---
 # ==========================================================
 
-# ... (funções calculate_hmac_signature_current, calculate_hmac_signature_historic, arredondar_timestamp_15min, fetch_data_from_weatherlink_api mantidas iguais) ...
 def calculate_hmac_signature_current(api_key, api_secret, t, station_id):
     params_para_assinar = {"api-key": api_key, "station-id": str(station_id), "t": str(t)}
     string_para_assinar = ""
@@ -557,18 +546,9 @@ def fetch_data_from_zentra_cloud():
 
 
 # ==========================================================
-# --- FIM: FUNÇÃO (ZENTRA CLOUD) (INCREMENTAL) ---
-# ==========================================================
-
-
-# ==========================================================
-# --- INÍCIO: NOVA FUNÇÃO (BACKFILL ZENTRA) ---
+# --- INÍCIO: FUNÇÃO BACKFILL ZENTRA (CORRIGIDA) ---
 # ==========================================================
 def backfill_zentra_km72_data(df_historico_existente):
-    """
-    Busca os últimos 3 dias (72h) de dados de umidade da Zentra Cloud
-    e os salva no banco de dados e no CSV.
-    """
     id_ponto = ID_PONTO_ZENTRA_KM72
     print(f"[API Zentra] Iniciando Backfill de 72h para {id_ponto}...")
 
@@ -607,14 +587,14 @@ def backfill_zentra_km72_data(df_historico_existente):
                     continue
                 else:
                     adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Tentativas esgotadas (429).")
-                    return  # Falha no backfill
+                    return
 
             else:
                 adicionar_log(id_ponto, f"ERRO API Zentra (Backfill) (Status {response.status_code}): {response.text}")
-                return  # Falha no backfill
+                return
 
     if response is None or response.status_code != 200:
-        return  # Falhou em obter os dados
+        return
 
     # 2. Processar a resposta (JSON)
     try:
@@ -631,8 +611,6 @@ def backfill_zentra_km72_data(df_historico_existente):
             adicionar_log(id_ponto, "AVISO API Zentra (Backfill): 'Water Content' não encontrado.")
             return
 
-        # Dicionário para organizar os dados por timestamp
-        # Ex: {'2025-11-13T12:00:00Z': {'umidade_1m_perc': 39.5, 'umidade_2m_perc': 43.0}}
         dados_por_timestamp = {}
 
         for sensor_block in wc_data:
@@ -649,20 +627,17 @@ def backfill_zentra_km72_data(df_historico_existente):
                     if not ts_str_iso or value is None:
                         continue
 
-                    # Arredonda o timestamp (igual fazemos na WeatherLink)
                     try:
                         ts_epoch = datetime.datetime.fromisoformat(ts_str_iso).timestamp()
                         ts_arredondado_iso = arredondar_timestamp_15min(ts_epoch)
                     except Exception:
-                        continue  # Ignora timestamps mal formatados
+                        continue
 
-                    # Converte o valor para %
                     try:
                         valor_percentual = float(value) * 100.0
                     except Exception:
-                        continue  # Ignora valores mal formatados
+                        continue
 
-                    # Adiciona ao nosso dicionário
                     if ts_arredondado_iso not in dados_por_timestamp:
                         dados_por_timestamp[ts_arredondado_iso] = {}
 
@@ -679,10 +654,14 @@ def backfill_zentra_km72_data(df_historico_existente):
             linha = {
                 'timestamp': ts,
                 'id_ponto': id_ponto,
-                'chuva_mm': 0.0,  # Backfill de umidade não afeta chuva
+                'chuva_mm': pd.NA,  # O backfill Zentra não traz chuva
+                'precipitacao_acumulada_mm': pd.NA,
                 'umidade_1m_perc': valores.get('umidade_1m_perc'),
                 'umidade_2m_perc': valores.get('umidade_2m_perc'),
                 'umidade_3m_perc': valores.get('umidade_3m_perc'),
+                'base_1m': pd.NA,
+                'base_2m': pd.NA,
+                'base_3m': pd.NA,
             }
             lista_para_df.append(linha)
 
@@ -690,26 +669,56 @@ def backfill_zentra_km72_data(df_historico_existente):
         df_backfill_zentra['timestamp'] = pd.to_datetime(df_backfill_zentra['timestamp'], utc=True)
 
         # 4. Salvar no SQLite e CSV
-        # (O SQLite irá ignorar duplicatas automaticamente)
         save_to_sqlite(df_backfill_zentra)
 
-        # Para o CSV, precisamos fundir os dados
-        df_final_csv = pd.concat([df_historico_existente, df_backfill_zentra], ignore_index=True)
-        # Remove duplicatas, mantendo os dados mais recentes
-        df_final_csv = df_final_csv.sort_values(by='timestamp').drop_duplicates(
-            subset=['id_ponto', 'timestamp'], keep='last')
+        # --- INÍCIO DA CORREÇÃO: Mesclagem Robusta com Merge ---
 
-        # Agora, precisamos "juntar" linhas que têm o mesmo timestamp e ponto
-        # (ex: uma linha da Zentra e uma da WeatherLink)
+        # 1. Limpa os DataFrames para garantir apenas colunas históricas
+        df_historico_existente = df_historico_existente[
+            [col for col in COLUNAS_HISTORICO if col in df_historico_existente.columns]].copy()
 
-        # Agrupa por timestamp e ponto, e preenche os NAs
-        # Pega o 'max': 39.5 e NA -> 39.5. / 0.0 e NA -> 0.0
-        df_agrupado = df_final_csv.groupby(['id_ponto', 'timestamp']).max().reset_index()
+        df_backfill_zentra_clean = df_backfill_zentra[
+            [col for col in COLUNAS_HISTORICO if col in df_backfill_zentra.columns]].copy()
+
+        # 2. Mescla os dados existentes (com chuva) com os novos dados de umidade (zentra)
+        df_mesclado = pd.merge(
+            df_historico_existente,
+            df_backfill_zentra_clean,
+            on=['id_ponto', 'timestamp'],
+            how='outer',
+            suffixes=('_old', '_new')
+        )
+
+        # 3. Preenche as colunas vazias usando a lógica: novo valor (umidade) > valor antigo (chuva)
+        for col in COLUNAS_HISTORICO:
+            if col not in ['id_ponto', 'timestamp']:
+                col_old = f'{col}_old'
+                col_new = f'{col}_new'
+
+                # Se col_old e col_new existem, use fillna para priorizar 'new' sobre 'old'
+                if col_old in df_mesclado.columns and col_new in df_mesclado.columns:
+                    df_mesclado[col] = df_mesclado[col_new].fillna(df_mesclado[col_old])
+                    df_mesclado = df_mesclado.drop(columns=[col_old, col_new])
+                # Se só a coluna antiga existir (caso em que a nova não preencheu, o que é raro no merge 'outer')
+                elif col_old in df_mesclado.columns:
+                    df_mesclado = df_mesclado.rename(columns={col_old: col})
+                # Se só a nova existir, renomeie
+                elif col_new in df_mesclado.columns:
+                    df_mesclado = df_mesclado.rename(columns={col_new: col})
+                # Se nenhuma existir, cria como NA para garantir a coluna
+                elif col not in df_mesclado.columns:
+                    df_mesclado[col] = pd.NA
+
+        # 4. Remove duplicatas restantes e salva apenas as colunas históricas
+        df_agrupado = df_mesclado.drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last')
+        df_agrupado = df_agrupado[COLUNAS_HISTORICO]
 
         save_historico_to_csv(df_agrupado)
 
+        # --- FIM DA CORREÇÃO: Mesclagem Robusta com Merge ---
+
         adicionar_log(id_ponto,
-                      f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade 72h salvos.")
+                      f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade 72h salvos e mesclados.")
 
     except Exception as e:
         print(f"ERRO CRÍTICO API Zentra (Backfill Processamento): {e}")
@@ -718,16 +727,10 @@ def backfill_zentra_km72_data(df_historico_existente):
 
 
 # ==========================================================
-# --- FIM: NOVA FUNÇÃO (BACKFILL ZENTRA) ---
-# ==========================================================
-
-
-# ==========================================================
 # --- FUNÇÃO DE BACKFILL (WeatherLink KM 67) ---
 # ==========================================================
 
 def backfill_km67_pro_data(df_historico_existente):
-    # ... (Esta função permanece igual) ...
     id_ponto = "Ponto-A-KM67"
     station_config = WEATHERLINK_CONFIG[id_ponto]
     station_id = station_config['STATION_ID']
