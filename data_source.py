@@ -1,4 +1,4 @@
-# data_source.py (COMPLETO, v8 - Adiciona get_status_from_disk)
+# data_source.py (COMPLETO, v9 - Reverte para save_historico_to_csv)
 
 import pandas as pd
 import json
@@ -90,12 +90,10 @@ def save_to_sqlite(df_novos_dados):
     try:
         engine = get_engine()
 
-        # --- INÍCIO DA ALTERAÇÃO v7 ---
         # Garantimos que apenas as colunas do DB sejam enviadas
         df_para_salvar = df_novos_dados[COLUNAS_HISTORICO].copy()
 
         df_para_salvar.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
-        # --- FIM DA ALTERAÇÃO v7 ---
 
         print(f"[SQLite] {len(df_para_salvar)} novos pontos salvos no DB.")
     except Exception as e:
@@ -164,12 +162,13 @@ def read_data_from_sqlite(id_ponto, start_dt, end_dt):
 
 
 # ==========================================================
-# --- FUNÇÕES DE LEITURA E ESCRITA CSV (PARA TESTES) ---
+# --- FUNÇÕES DE LEITURA E ESCRITA CSV (REVERTIDO PARA v7) ---
 # ==========================================================
 
 def read_historico_from_csv():
     """
-    (v8) Esta função agora TAMBÉM limpa os dados duplicados na leitura.
+    (v9) Esta função lê o CSV.
+    Adicionamos um 'try...except' para lidar com o arquivo corrompido (ValueError).
     """
     try:
         historico_df = pd.read_csv(HISTORICO_FILE_CSV, sep=',')
@@ -177,80 +176,77 @@ def read_historico_from_csv():
         print(f"[CSV] Arquivo '{HISTORICO_FILE_CSV}' não encontrado. Criando novo.")
         return pd.DataFrame(columns=COLUNAS_HISTORICO)
     except Exception as e:
+        # Se falhar ao ler (ex: arquivo corrompido), apaga o arquivo e começa de novo
+        if "ValueError" in str(e):
+            print(f"ERRO: Arquivo CSV corrompido ({e}). Apagando e recriando...")
+            try:
+                os.remove(HISTORICO_FILE_CSV)
+            except Exception as e_rm:
+                print(f"ERRO: Não foi possível apagar o CSV corrompido: {e_rm}")
+            return pd.DataFrame(columns=COLUNAS_HISTORICO)
+
         adicionar_log("CSV_READ", f"ERRO ao ler {HISTORICO_FILE_CSV}: {e}")
         print(f"ERRO ao ler {HISTORICO_FILE_CSV}: {e}")
         traceback.print_exc()
         return pd.DataFrame(columns=COLUNAS_HISTORICO)
 
     if 'timestamp' in historico_df.columns:
-        historico_df['timestamp'] = pd.to_datetime(historico_df['timestamp'], utc=True)
+        # --- INÍCIO DA ALTERAÇÃO v9: Lida com o ValueError ---
+        try:
+            # Tenta converter o timestamp
+            historico_df['timestamp'] = pd.to_datetime(historico_df['timestamp'], utc=True)
+        except (ValueError, TypeError) as e_time:
+            # Se falhar (ex: "Ponto-A-KM67" na coluna de data), apaga o arquivo
+            print(f"ERRO: Coluna 'timestamp' corrompida ({e_time}). Apagando e recriando CSV...")
+            try:
+                os.remove(HISTORICO_FILE_CSV)
+            except Exception as e_rm:
+                print(f"ERRO: Não foi possível apagar o CSV corrompido: {e_rm}")
+            return pd.DataFrame(columns=COLUNAS_HISTORICO)
+        # --- FIM DA ALTERAÇÃO v9 ---
 
     colunas_validas = [col for col in COLUNAS_HISTORICO if col in historico_df.columns]
     historico_df = historico_df[colunas_validas]
 
-    # --- INÍCIO DA ALTERAÇÃO v8: Mesclagem movida para a LEITURA ---
-    # Garante que o dashboard (que chama esta função) sempre veja dados limpos
+    # A mesclagem garante que o dashboard sempre veja dados limpos
     df_para_agrupar = historico_df.copy()
     for col in COLUNAS_HISTORICO:
         if col not in df_para_agrupar.columns:
             df_para_agrupar[col] = pd.NA
 
     df_agrupado = df_para_agrupar.groupby(['id_ponto', 'timestamp']).max().reset_index()
-    # --- FIM DA ALTERAÇÃO v8 ---
 
     print(f"[CSV] Histórico lido e mesclado: {len(df_agrupado)} entradas.")
     return df_agrupado
 
 
-def append_to_csv(df_novos_dados):
+def save_historico_to_csv(df):
     """
-    (v8) Nova função "leve" que APENAS anexa dados ao CSV.
-    Não lê o arquivo antigo, evitando deadlocks.
-    """
-    if df_novos_dados.empty:
-        return
-
-    try:
-        # Garante que as colunas extras sejam removidas
-        df_para_salvar = df_novos_dados[COLUNAS_HISTORICO].copy()
-
-        # Verifica se o arquivo existe para adicionar cabeçalho
-        file_exists = os.path.exists(HISTORICO_FILE_CSV)
-
-        df_para_salvar.to_csv(
-            HISTORICO_FILE_CSV,
-            mode='a',  # 'a' = Append (Anexar)
-            header=not file_exists,  # Só adiciona cabeçalho se o arquivo for novo
-            index=False
-        )
-        print(f"[CSV] {len(df_para_salvar)} novas linhas anexadas ao CSV.")
-    except Exception as e:
-        adicionar_log("CSV_APPEND", f"ERRO ao anexar ao histórico: {e}")
-        print(f"ERRO ao anexar ao CSV: {e}")
-        traceback.print_exc()
-
-
-def truncate_csv():
-    """
-    (v8) Nova função que lê o CSV, limpa duplicatas e trunca o arquivo.
-    Deve ser chamada *depois* que os dados foram anexados.
+    (v9) Revertido para a lógica v7: Ler, mesclar, truncar e sobrescrever.
+    Isso é mais lento, mas 100% seguro contra corrupção.
     """
     try:
-        # 1. Lê o CSV (a função read_historico_from_csv já limpa as duplicatas)
-        df_limpo = read_historico_from_csv()
+        # 1. Garante que todas as colunas existam
+        df_para_agrupar = df.copy()
+        for col in COLUNAS_HISTORICO:
+            if col not in df_para_agrupar.columns:
+                df_para_agrupar[col] = pd.NA
 
-        # 2. Trunca (pega apenas os últimos N pontos)
-        df_ordenado = df_limpo.sort_values(by='timestamp')
+        # 2. Agrupa por ponto/timestamp e pega o valor MÁXIMO (mesclagem)
+        df_agrupado = df_para_agrupar.groupby(['id_ponto', 'timestamp']).max().reset_index()
+
+        # 3. Ordena e Trunca
+        df_sem_duplicatas = df_agrupado.sort_values(by='timestamp')
         max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
-        df_truncado = df_ordenado.tail(max_pontos)
+        df_truncado = df_sem_duplicatas.tail(max_pontos)
 
-        # 3. Sobrescreve o arquivo
+        # 4. Sobrescreve o arquivo
         df_truncado.to_csv(HISTORICO_FILE_CSV, index=False)
-        print(f"[CSV] Arquivo truncado (Mantidas {len(df_truncado)} entradas).")
+        print(f"[CSV] Histórico salvo (SOBRESCRITO) no arquivo (Mantidas {len(df_truncado)} entradas).")
 
     except Exception as e:
-        adicionar_log("CSV_TRUNCATE", f"ERRO ao truncar histórico: {e}")
-        print(f"ERRO ao truncar CSV: {e}")
+        adicionar_log("CSV_SAVE", f"ERRO ao salvar (sobrescrever) histórico: {e}")
+        print(f"ERRO ao salvar (sobrescrever) CSV: {e}")
         traceback.print_exc()
 
 
@@ -260,7 +256,7 @@ def truncate_csv():
 
 def get_status_from_disk():
     """
-    (v8) Nova função leve que SÓ lê o status JSON.
+    (v9) Função leve que SÓ lê o status JSON.
     """
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
@@ -275,7 +271,7 @@ def get_status_from_disk():
 
 def get_all_data_from_disk():
     """
-    (v8) Esta função é usada pelo DASHBOARD.
+    (v9) Esta função é usada pelo DASHBOARD.
     Ela lê o CSV (e o limpa), o Status e os Logs.
     """
     historico_df = read_historico_from_csv()  # Esta função agora limpa os dados
@@ -292,17 +288,16 @@ def get_all_data_from_disk():
 
 
 # ==========================================================
-# --- FUNÇÕES USADAS PELO WORKER.PY (ALTERAÇÃO v8) ---
+# --- FUNÇÕES USADAS PELO WORKER.PY (ALTERAÇÃO v9) ---
 # ==========================================================
 
-def executar_passo_api_e_salvar():  # (v8) Não precisa mais do historico_df
+def executar_passo_api_e_salvar():  # (v9) Não precisa mais do historico_df
     """
-    (v8) Esta função agora SÓ coleta dados da WeatherLink e os retorna.
+    (v9) Esta função agora SÓ coleta dados da WeatherLink e os retorna.
     Ela NÃO salva mais no SQLite ou CSV.
     """
     try:
-        # 1. Coleta dados de CHUVA (WeatherLink)
-        # (v8) Passa um DF vazio, já que não é usado
+        # (v9) Passa um DF vazio, já que não é usado
         dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api(pd.DataFrame())
 
         for log in logs_api:
@@ -371,7 +366,7 @@ def arredondar_timestamp_15min(ts_epoch):
     return dt_obj.isoformat()
 
 
-def fetch_data_from_weatherlink_api(df_historico):  # (v8) df_historico não é mais usado
+def fetch_data_from_weatherlink_api(df_historico):  # (v9) df_historico não é mais usado
     import processamento
 
     WEATHERLINK_API_ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
@@ -502,14 +497,12 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
     }
     headers = {"Authorization": f"Token {ZENTRA_API_TOKEN}"}
     try:
-        # --- INÍCIO DA ALTERAÇÃO (Adiciona timeout=15.0) ---
+        # --- (Patch de TIMEOUT v8 mantido) ---
         response = client.get(url, headers=headers, params=params, timeout=15.0)
-        # --- FIM DA ALTERAÇÃO ---
         return response
-    except httpx.TimeoutException:  # --- ADICIONADO ---
-        print(
-            f"ERRO DE TIMEOUT ZENTRA: A API demorou mais de 15s para responder (IP pode estar bloqueado).")  # --- ADICIONADO ---
-        return None  # --- ADICIONADO ---
+    except httpx.TimeoutException:
+        print(f"ERRO DE TIMEOUT ZENTRA: A API demorou mais de 15s para responder (IP pode estar bloqueado).")
+        return None
     except httpx.RequestError as e:
         print(f"ERRO DE CONEXÃO ZENTRA: {e}")
         return None
@@ -650,10 +643,8 @@ def backfill_zentra_km72_data(df_historico_existente):
     # Data final da busca: Agora
     end_date = datetime.datetime.now(datetime.timezone.utc)
 
-    # --- INÍCIO DA ALTERAÇÃO (Linha ~679) ---
-    # Padrão: 1 dia atrás (para garantir o preenchimento incremental sem estourar a API)
+    # Padrão: 1 dia atrás
     default_start_date = end_date - datetime.timedelta(days=1)
-    # --- FIM DA ALTERAÇÃO ---
 
     if latest_ts is None or latest_ts < INSTALL_DATE_KM72:
         # Primeira execução, ou dados perdidos/muito antigos: Começar da instalação (backfill completo)
@@ -680,9 +671,7 @@ def backfill_zentra_km72_data(df_historico_existente):
             if attempt > 1:
                 print(f"[API Zentra Backfill] Tentativa {attempt}/{MAX_RETRIES}...")
 
-            # --- NOVO: Usando start_date e end_date calculados ---
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
-            # ----------------------------------------------------
 
             if response is None:  # Erro de conexão ou TIMEOUT
                 adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão ou Timeout.")
@@ -761,11 +750,9 @@ def backfill_zentra_km72_data(df_historico_existente):
                           "AVISO API Zentra (Backfill): Nenhum dado válido encontrado para as portas 1, 2, 3.")
             return
 
-        # --- Log de Contagem Crítica ---
         count_timestamps = len(dados_por_timestamp)
         print(f"[API Zentra Backfill] {count_timestamps} timestamps únicos processados do Zentra.")
         adicionar_log(id_ponto, f"API Zentra Backfill: {count_timestamps} timestamps únicos processados.")
-        # -------------------------------
 
         # 3. Converter para DataFrame
         lista_para_df = []
@@ -773,7 +760,7 @@ def backfill_zentra_km72_data(df_historico_existente):
             linha = {
                 'timestamp': ts,
                 'id_ponto': id_ponto,
-                'chuva_mm': pd.NA,  # O backfill Zentra não traz chuva
+                'chuva_mm': pd.NA,
                 'precipitacao_acumulada_mm': pd.NA,
                 'umidade_1m_perc': valores.get('umidade_1m_perc'),
                 'umidade_2m_perc': valores.get('umidade_2m_perc'),
@@ -790,10 +777,10 @@ def backfill_zentra_km72_data(df_historico_existente):
         # 4. Salvar no SQLite e CSV
         save_to_sqlite(df_backfill_zentra)
 
-        # --- INÍCIO DA ALTERAÇÃO v8: Usa a nova função append_to_csv ---
-        append_to_csv(df_backfill_zentra)
-        # Agora o "truncate" será chamado pelo index.py
-        # --- FIM DA ALTERAÇÃO v8 ---
+        # --- INÍCIO DA ALTERAÇÃO v9: Usa save_historico_to_csv ---
+        df_combinado = pd.concat([df_historico_existente, df_backfill_zentra], ignore_index=True)
+        save_historico_to_csv(df_combinado)
+        # --- FIM DA ALTERAÇÃO v9 ---
 
         adicionar_log(id_ponto,
                       f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade salvos e mesclados.")
@@ -880,9 +867,10 @@ def backfill_km67_pro_data(df_historico_existente):
 
         save_to_sqlite(df_backfill)
 
-        # --- INÍCIO DA ALTERAÇÃO v8: Usa a nova função append_to_csv ---
-        append_to_csv(df_backfill)
-        # --- FIM DA ALTERAÇÃO v8 ---
+        # --- INÍCIO DA ALTERAÇÃO v9: Usa save_historico_to_csv ---
+        df_combinado = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
+        save_historico_to_csv(df_combinado)
+        # --- FIM DA ALTERAÇÃO v9 ---
 
         adicionar_log(id_ponto,
                       f"SUCESSO (Backfill): {len(df_backfill)} registros históricos de 72h (3x 24h) salvos (CSV e SQLite).")

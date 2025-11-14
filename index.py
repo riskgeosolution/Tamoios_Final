@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v8: Remove leitura de CSV do loop do worker)
+# index.py (COMPLETO, v9: Corrige Deadlock + Sincroniza CSV/DB)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -73,17 +73,17 @@ def worker_verificar_alertas(status_novos, status_antigos):
 def worker_main_loop():
     """
     Função que roda a CADA 15 MINUTOS (Modo Leve)
-    (v8: Não lê mais o CSV, apenas anexa)
+    (v9: Corrige Deadlock + Sincroniza CSV/DB)
     """
     inicio_ciclo = time.time()
     try:
-        # --- INÍCIO DA ALTERAÇÃO v8: Evita Deadlock ---
+        # --- INÍCIO DA ALTERAÇÃO v9: Evita Deadlock ---
         # Não lemos mais o CSV aqui. Apenas o status JSON (que é rápido e seguro).
         status_antigos_do_disco = data_source.get_status_from_disk()
         print(f"WORKER (Thread): Início do ciclo.")
 
         # O backfill de KM67 foi removido do loop de 15 min para evitar a leitura do CSV.
-        # --- FIM DA ALTERAÇÃO v8 ---
+        # --- FIM DA ALTERAÇÃO v9 ---
 
         # --- LÓGICA DE COLETA LEVE (CHUVA + UMIDADE) ---
 
@@ -140,14 +140,17 @@ def worker_main_loop():
             # Salva no SQLITE (agora só salva UMA VEZ, e a linha correta)
             data_source.save_to_sqlite(df_novos_mesclados)
 
-            # --- INÍCIO DA ALTERAÇÃO v8: Append-only ---
-            # Apenas anexa os novos dados mesclados
-            data_source.append_to_csv(df_novos_mesclados)
+            # --- INÍCIO DA ALTERAÇÃO v9: Lógica de salvamento v7 ---
+            # Para salvar no CSV, precisamos primeiro LER o histórico antigo.
+            # Fazemos isso DEPOIS que a coleta de API terminou, para minimizar o deadlock.
+            historico_antigo_df = data_source.read_historico_from_csv()
 
-            # Chama a função separada para limpar e truncar o CSV
-            # Esta é a única leitura/escrita que faremos no CSV
-            data_source.truncate_csv()
-            # --- FIM DA ALTERAÇÃO v8 ---
+            # Concatena o histórico antigo com os novos dados mesclados
+            historico_final_para_csv = pd.concat([historico_antigo_df, df_novos_mesclados], ignore_index=True)
+
+            # Chama a função de "sobrescrever" (lenta, mas segura)
+            data_source.save_historico_to_csv(historico_final_para_csv)
+            # --- FIM DA ALTERAÇÃO v9 ---
 
             print("[Worker Thread] Dados mesclados salvos no CSV e SQLite.")
         else:
@@ -155,10 +158,10 @@ def worker_main_loop():
         # --- FIM DA LÓGICA DE MESCLAGEM ---
 
         # 5. CÁLCULO DE STATUS (Com os dados mesclados)
-        # --- INÍCIO DA ALTERAÇÃO v8 ---
+        # --- INÍCIO DA ALTERAÇÃO v9 ---
         # Agora lemos o histórico COMPLETO aqui, DEPOIS que a escrita foi concluída
-        historico_completo, _, _ = data_source.get_all_data_from_disk()
-        # --- FIM DA ALTERAÇÃO v8 ---
+        historico_completo = data_source.read_historico_from_csv()  # (v9) Lemos o CSV atualizado
+        # --- FIM DA ALTERAÇÃO v9 ---
 
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
@@ -248,10 +251,7 @@ def background_task_wrapper():
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
 
-    # --- INÍCIO DA ALTERAÇÃO (REMOVIDO BACKFILL INICIAL) ---
-    # A lógica de backfill pesado foi removida daqui
-    # para evitar o travamento (deadlock) no deploy.
-    # --- FIM DA ALTERAÇÃO ---
+    # (Backfill inicial removido para evitar deadlock no deploy)
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
@@ -397,7 +397,7 @@ def update_data_and_logs_from_disk(n_intervals):
 # --- SEÇÃO DE EXECUÇÃO LOCAL (COM CORREÇÃO PARA DEBUG MODE) ---
 # ==============================================================================
 
-# ... (Esta secção permanece EXATAMENTE IGUAL) ...
+# ... (Esta secção permanece EXATAMENTE IGUAIS) ...
 data_source.setup_disk_paths()
 if not os.environ.get("WERKZEUG_MAIN"):
     print("Iniciando o worker (coletor de dados) em um thread separado...")
