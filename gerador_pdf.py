@@ -1,5 +1,3 @@
-# gerador_pdf.py (COMPLETO, CORRIGIDO)
-
 import io
 from fpdf import FPDF, Align
 from datetime import datetime
@@ -31,6 +29,8 @@ PDF_CACHE_LOCK = threading.Lock()
 
 EXCEL_CACHE = {}
 EXCEL_CACHE_LOCK = threading.Lock()
+
+
 # --- FIM DA CORREÇÃO ---
 
 
@@ -61,7 +61,7 @@ def criar_relatorio_excel_em_memoria(df_dados, nome_ponto):
             'Umidade 2m (%)', 'Base Umidade 2m (%)',
             'Umidade 3m (%)', 'Base Umidade 3m (%)'
         ]
-        
+
         # Garante que apenas colunas existentes sejam usadas
         colunas_existentes = [col for col in colunas_para_exportar if col in df_relatorio.columns]
         df_relatorio = df_relatorio[colunas_existentes]
@@ -117,7 +117,7 @@ def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
 
         # 5. Chamar a função de gerar Excel
         excel_buffer = criar_relatorio_excel_em_memoria(df_para_excel, nome_ponto)
-        
+
         nome_arquivo = f"Dados_{nome_ponto}_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
         # 6. Salva no CACHE
@@ -139,7 +139,10 @@ def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
 
 
 # --- FUNÇÕES AUXILIARES DE CRIAÇÃO DE PDF ---
-def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor, periodo_str=""):
+
+# (Assinatura da função mantida da correção anterior)
+def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor, periodo_str="",
+                               nome_ponto="Ponto Desconhecido"):
     """
     Cria um relatório PDF em buffer de memória.
     """
@@ -168,8 +171,10 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
     pdf.set_font("Helvetica", size=10)
 
     pdf.set_font("Helvetica", "B", 14)
-    id_ponto_rel = df_dados.iloc[0]['id_ponto'] if not df_dados.empty else "Monitoramento"
-    pdf.cell(0, 10, f"Relatório de Monitoramento - {id_ponto_rel}", ln=True, align="C")
+
+    # (Título do PDF mantido da correção anterior)
+    titulo_relatorio = f"Relatório de Monitoramento - Estação {nome_ponto}"
+    pdf.cell(0, 10, titulo_relatorio, ln=True, align="C")
 
     data_inicio_local = df_dados['timestamp_local'].min().strftime('%d/%m/%Y %H:%M')
     data_fim_local = df_dados['timestamp_local'].max().strftime('%d/%m/%Y %H:%M')
@@ -304,6 +309,9 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         df_filtrado['timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
+        # (Pegando o nome amigável)
+        nome_ponto = config['nome']
+
         status_atual_dict = status_json
         risco_geral = RISCO_MAP.get(status_atual_dict.get(id_ponto, "INDEFINIDO"), -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
@@ -355,19 +363,43 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         fig_chuva_mp.subplots_adjust(bottom=0.25, top=0.9)
 
         fig_umidade_mp, ax_umidade = plt.subplots(figsize=(10, 5))
-        
-        # --- CORREÇÃO: REMOVIDA A IMPORTAÇÃO CIRCULAR ---
+
         ax_umidade.plot(df_filtrado['timestamp_local'], df_filtrado['umidade_1m_perc'], label='1m',
                         color=CORES_ALERTAS_CSS['verde'], linewidth=2)
         ax_umidade.plot(df_filtrado['timestamp_local'], df_filtrado['umidade_2m_perc'], label='2m',
                         color=CORES_ALERTAS_CSS['laranja'], linewidth=2)
         ax_umidade.plot(df_filtrado['timestamp_local'], df_filtrado['umidade_3m_perc'], label='3m',
                         color=CORES_ALERTAS_CSS['vermelho'], linewidth=2)
-        # --- FIM DA CORREÇÃO ---
 
         ax_umidade.set_title(f"Variação da Umidade do Solo - Estação {config['nome']}", fontsize=12)
         ax_umidade.set_xlabel("Data e Hora")
         ax_umidade.set_ylabel("Umidade do Solo (%)")
+
+        # --- INÍCIO DA ALTERAÇÃO (Eixo Y 0-50% para Matplotlib) ---
+        try:
+            # Concatena todas as séries de umidade para encontrar o min/max real
+            all_umidade_data = pd.concat([
+                df_filtrado['umidade_1m_perc'],
+                df_filtrado['umidade_2m_perc'],
+                df_filtrado['umidade_3m_perc']
+            ]).dropna()
+
+            if all_umidade_data.empty:
+                final_min, final_max = 0, 50
+            else:
+                data_min = all_umidade_data.min()
+                data_max = all_umidade_data.max()
+                # Garante que o eixo comece em 0 (ou abaixo)
+                final_min = min(0, data_min - 5)
+                # Garante que o eixo vá até 50 (ou acima)
+                final_max = max(50, data_max + 5)
+
+            ax_umidade.set_ylim(final_min, final_max)
+        except Exception as e:
+            print(f"Erro ao definir range Y da umidade (PDF): {e}")
+            # Se falhar, deixa o Matplotlib decidir (autoscale)
+            pass
+        # --- FIM DA ALTERAÇÃO ---
 
         lines, labels = ax_umidade.get_legend_handles_labels()
         fig_umidade_mp.legend(lines, labels,
@@ -379,7 +411,9 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         pdf_buffer = criar_relatorio_em_memoria(
             df_filtrado, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor,
-            periodo_str
+            periodo_str,
+            # (Passando o nome amigável para a função de criação)
+            nome_ponto=nome_ponto
         )
 
         plt.close(fig_chuva_mp)

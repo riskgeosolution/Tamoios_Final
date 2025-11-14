@@ -204,6 +204,25 @@ def update_general_dashboard(dados_json, selected_hours):
         )
         # --- FIM DA ALTERAÇÃO ---
 
+        # --- INÍCIO DA ALTERAÇÃO (Eixo Y 0-50%) ---
+        try:
+            if df_umidade['Umidade Solo (%)'].dropna().empty:
+                final_min, final_max = 0, 50
+            else:
+                data_min = df_umidade['Umidade Solo (%)'].min()
+                data_max = df_umidade['Umidade Solo (%)'].max()
+                # Garante que o eixo comece em 0 (ou abaixo, se houver dados < 0)
+                final_min = min(0, data_min - 5)
+                # Garante que o eixo vá até 50 (ou acima, se dados > 45)
+                final_max = max(50, data_max + 5)
+
+            fig_umidade.update_yaxes(range=[final_min, final_max])
+        except Exception as e:
+            print(f"Erro ao definir range Y da umidade (geral): {e}")
+            # Se falhar, deixa o Plotly decidir (autoscale)
+            pass
+        # --- FIM DA ALTERAÇÃO ---
+
         # Layout Lado a Lado
         col_chuva = dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, lg=6,
                             className="mb-4")

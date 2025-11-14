@@ -221,7 +221,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
         ultima_chuva_72h = df_chuva_72h_completo.iloc[-1]['chuva_mm'] if not df_chuva_72h_completo.empty else 0.0
         ultima_chuva_72h = ultima_chuva_72h if not pd.isna(ultima_chuva_72h) else 0.0
-        
+
         css_color_s1 = CORES_UMIDADE['1m'] if (ultimo_dado.get('umidade_1m_perc',
                                                                base_1m) - base_1m) >= DELTA_TRIGGER_UMIDADE else 'green'
         css_color_s2 = CORES_UMIDADE['2m'] if (ultimo_dado.get('umidade_2m_perc',
@@ -278,6 +278,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     fig_chuva.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %Hh", tickangle=-45)
     fig_chuva.update_yaxes(title_text="Pluviometria Horária (mm)", secondary_y=False);
     fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)
+
     df_umidade = df_ponto_plot.melt(id_vars=['timestamp_local'],
                                     value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                     var_name='Sensor', value_name='Umidade (%)')
@@ -291,6 +292,26 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
                               legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
                               xaxis_title="Data e Hora", yaxis_title="Umidade do Solo (%)")
     fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %Hh", tickangle=-45)
+
+    # --- INÍCIO DA ALTERAÇÃO (Eixo Y 0-50%) ---
+    try:
+        if df_umidade['Umidade (%)'].dropna().empty:
+            final_min, final_max = 0, 50
+        else:
+            data_min = df_umidade['Umidade (%)'].min()
+            data_max = df_umidade['Umidade (%)'].max()
+            # Garante que o eixo comece em 0 (ou abaixo, se houver dados < 0)
+            final_min = min(0, data_min - 5)
+            # Garante que o eixo vá até 50 (ou acima, se dados > 45)
+            final_max = max(50, data_max + 5)
+
+        fig_umidade.update_yaxes(range=[final_min, final_max])
+    except Exception as e:
+        print(f"Erro ao definir range Y da umidade: {e}")
+        # Se falhar, deixa o Plotly decidir (autoscale)
+        pass
+    # --- FIM DA ALTERAÇÃO ---
+
     layout_graficos = [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
