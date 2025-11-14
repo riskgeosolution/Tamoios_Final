@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v7: Mesclagem Centralizada antes de Salvar)
+# index.py (COMPLETO, v8: Remove leitura de CSV do loop do worker)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -73,53 +73,23 @@ def worker_verificar_alertas(status_novos, status_antigos):
 def worker_main_loop():
     """
     Função que roda a CADA 15 MINUTOS (Modo Leve)
-    (v7: Mesclagem Centralizada)
+    (v8: Não lê mais o CSV, apenas anexa)
     """
     inicio_ciclo = time.time()
     try:
-        # 1. Lê o histórico (cache CSV de 72h) e os status
-        historico_df, status_antigos_do_disco, logs = data_source.get_all_data_from_disk()
-        if not status_antigos_do_disco:
-            status_antigos_do_disco = {p: "INDEFINIDO" for p in PONTOS_DE_ANALISE.keys()}
+        # --- INÍCIO DA ALTERAÇÃO v8: Evita Deadlock ---
+        # Não lemos mais o CSV aqui. Apenas o status JSON (que é rápido e seguro).
+        status_antigos_do_disco = data_source.get_status_from_disk()
+        print(f"WORKER (Thread): Início do ciclo.")
 
-        print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
+        # O backfill de KM67 foi removido do loop de 15 min para evitar a leitura do CSV.
+        # --- FIM DA ALTERAÇÃO v8 ---
 
-        # --- LÓGICA DE BACKFILL DE CHUVA (KM 67) ---
-        # (Mantido: Isso só roda se houver uma falha, é seguro)
-        df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
-        run_backfill_km67 = False
-
-        if df_km67.empty:
-            print("[Worker Thread] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
-            run_backfill_km67 = True
-        else:
-            try:
-                if not pd.api.types.is_datetime64_any_dtype(df_km67['timestamp']):
-                    df_km67.loc[:, 'timestamp'] = pd.to_datetime(df_km67['timestamp'])
-                latest_timestamp = df_km67['timestamp'].max()
-                agora_utc = datetime.datetime.now(datetime.timezone.utc)
-                gap_segundos = (agora_utc - latest_timestamp).total_seconds()
-                if gap_segundos > (20 * 60):
-                    print(
-                        f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para o KM 67. Tentando backfill...")
-                    run_backfill_km67 = True
-            except Exception as e_gap:
-                print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 67): {e_gap}. Pulando backfill.")
-
-        if run_backfill_km67:
-            try:
-                data_source.backfill_km67_pro_data(historico_df)
-                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
-                print(f"[Worker Thread] Backfill KM 67 concluído.")
-            except Exception as e_backfill:
-                data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-        # --- FIM DO BACKFILL DE CHUVA ---
-
-        # --- INÍCIO DA ALTERAÇÃO v7: LÓGICA DE MESCLAGEM ---
+        # --- LÓGICA DE COLETA LEVE (CHUVA + UMIDADE) ---
 
         # 1. COLETAR CHUVA (WeatherLink)
         # (A função agora SÓ retorna o DF, não salva mais)
-        novos_dados_chuva_df, status_novos_API, _ = data_source.executar_passo_api_e_salvar(historico_df)
+        novos_dados_chuva_df, status_novos_API, _ = data_source.executar_passo_api_e_salvar()
 
         # 2. COLETAR UMIDADE (Zentra - MODO LEVE)
         df_umidade_incremental = pd.DataFrame(columns=data_source.COLUNAS_HISTORICO)
@@ -170,20 +140,26 @@ def worker_main_loop():
             # Salva no SQLITE (agora só salva UMA VEZ, e a linha correta)
             data_source.save_to_sqlite(df_novos_mesclados)
 
-            # Salva no CSV (adicionando ao histórico antigo)
-            historico_final_para_csv = pd.concat([historico_df, df_novos_mesclados], ignore_index=True)
-            data_source.save_historico_to_csv(historico_final_para_csv)
+            # --- INÍCIO DA ALTERAÇÃO v8: Append-only ---
+            # Apenas anexa os novos dados mesclados
+            data_source.append_to_csv(df_novos_mesclados)
 
-            # Recarrega o histórico final mesclado
-            historico_df, _, _ = data_source.get_all_data_from_disk()
+            # Chama a função separada para limpar e truncar o CSV
+            # Esta é a única leitura/escrita que faremos no CSV
+            data_source.truncate_csv()
+            # --- FIM DA ALTERAÇÃO v8 ---
+
             print("[Worker Thread] Dados mesclados salvos no CSV e SQLite.")
         else:
             print("[Worker Thread] Nenhum dado novo (chuva ou umidade) para salvar.")
-
-        # --- FIM DA ALTERAÇÃO v7 ---
+        # --- FIM DA LÓGICA DE MESCLAGEM ---
 
         # 5. CÁLCULO DE STATUS (Com os dados mesclados)
-        historico_completo = historico_df.copy()
+        # --- INÍCIO DA ALTERAÇÃO v8 ---
+        # Agora lemos o histórico COMPLETO aqui, DEPOIS que a escrita foi concluída
+        historico_completo, _, _ = data_source.get_all_data_from_disk()
+        # --- FIM DA ALTERAÇÃO v8 ---
+
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
@@ -271,6 +247,11 @@ def background_task_wrapper():
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
+
+    # --- INÍCIO DA ALTERAÇÃO (REMOVIDO BACKFILL INICIAL) ---
+    # A lógica de backfill pesado foi removida daqui
+    # para evitar o travamento (deadlock) no deploy.
+    # --- FIM DA ALTERAÇÃO ---
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
