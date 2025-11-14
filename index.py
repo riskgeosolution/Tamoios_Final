@@ -1,4 +1,4 @@
-# index.py (COMPLETO, CORREÇÃO DEFINITIVA v3)
+# index.py (COMPLETO, v5: Backfill de Umidade Único no Deploy)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -71,6 +71,9 @@ def worker_verificar_alertas(status_novos, status_antigos):
 
 
 def worker_main_loop():
+    """
+    Função que roda a CADA 15 MINUTOS (Modo Leve)
+    """
     inicio_ciclo = time.time()
     try:
         # 1. Lê o histórico (cache CSV de 72h) e os status
@@ -80,9 +83,8 @@ def worker_main_loop():
 
         print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
-        # --- LÓGICA DE BACKFILL (GAP CHECK) ---
-
-        # A. Backfill Chuva KM 67 (Plano Pro)
+        # --- LÓGICA DE BACKFILL DE CHUVA (KM 67) ---
+        # (Mantido: Isso só roda se houver uma falha, é seguro)
         df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
         run_backfill_km67 = False
 
@@ -110,44 +112,58 @@ def worker_main_loop():
                 print(f"[Worker Thread] Backfill KM 67 concluído.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
+        # --- FIM DO BACKFILL DE CHUVA ---
 
-        # --- FIM DO BACKFILL KM 67 ---
-
-        # --- INÍCIO DA CORREÇÃO (LÓGICA SIMPLIFICADA) ---
+        # --- LÓGICA DE COLETA LEVE (CHUVA + UMIDADE) ---
 
         # 1. COLETAR CHUVA (WeatherLink)
-        # Isso salva a linha atual (ex: 12:30) com dados de chuva e umidade NaN.
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
+        historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega
 
-        # Recarrega o histórico (que agora contém a linha de chuva 12:30)
-        historico_df, _, _ = data_source.get_all_data_from_disk()
-
-        # 2. COLETAR/MESCLAR UMIDADE (Zentra)
-        # Rodamos o backfill (4 dias) A CADA CICLO.
-        # A função backfill_zentra_km72_data JÁ busca os dados mais recentes E
-        # usa a lógica "groupby.max()" para mesclar com a linha de chuva que acabamos de salvar.
+        # 2. COLETAR UMIDADE (Zentra - MODO LEVE)
         try:
-            print("[Worker Thread] Executando Backfill/Merge de Umidade Zentra...")
-            data_source.backfill_zentra_km72_data(historico_df)
-            historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF mesclado
-            print(f"[Worker Thread] Backfill/Merge Umidade KM 72 concluído.")
-        except Exception as e_backfill_km72:
-            data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
+            print("[Worker Thread] Executando coleta INCREMENTAL de Umidade Zentra...")
+            dados_umidade_dict = data_source.fetch_data_from_zentra_cloud()
 
-        # 3. (REMOVIDO) Não há mais coleta incremental.
-        # 4. (REMOVIDO) Não há mais lógica de anexação de base (o backfill lida com isso se for preciso).
+            if dados_umidade_dict:
+                agora_epoch = datetime.datetime.now(datetime.timezone.utc).timestamp()
+                timestamp_arredondado = data_source.arredondar_timestamp_15min(agora_epoch)
 
-        # --- FIM DA CORREÇÃO ---
+                linha_umidade = {
+                    "timestamp": timestamp_arredondado,
+                    "id_ponto": ID_PONTO_ZENTRA_KM72,
+                    "chuva_mm": pd.NA,
+                    "precipitacao_acumulada_mm": pd.NA,
+                    "umidade_1m_perc": dados_umidade_dict.get('umidade_1m_perc'),
+                    "umidade_2m_perc": dados_umidade_dict.get('umidade_2m_perc'),
+                    "umidade_3m_perc": dados_umidade_dict.get('umidade_3m_perc'),
+                    "base_1m": pd.NA, "base_2m": pd.NA, "base_3m": pd.NA,
+                }
 
-        # 3. RECARREGAR O HISTÓRICO COMPLETO (FINAL)
+                df_umidade_incremental = pd.DataFrame([linha_umidade])
+                df_umidade_incremental['timestamp'] = pd.to_datetime(df_umidade_incremental['timestamp'], utc=True)
+
+                # Salva em AMBOS os locais (importante para PDF/Excel)
+                data_source.save_to_sqlite(df_umidade_incremental)
+                historico_combinado = pd.concat([historico_df, df_umidade_incremental], ignore_index=True)
+                data_source.save_historico_to_csv(historico_combinado)
+
+                # Recarrega o histórico final mesclado
+                historico_df, _, _ = data_source.get_all_data_from_disk()
+                print("[Worker Thread] Coleta incremental de Umidade Zentra mesclada.")
+            else:
+                print("[Worker Thread] Zentra (Incremental) não retornou novos dados.")
+        except Exception as e_incremental_km72:
+            data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Incremental Zentra): {e_incremental_km72}")
+            traceback.print_exc()
+        # --- FIM DA COLETA LEVE ---
+
+        # 3. CÁLCULO DE STATUS (Com os dados mesclados)
         historico_completo = historico_df.copy()
-
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
         else:
-
-            # 4. Calcular Status (Chuva + Umidade)
             status_atualizado = {}
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
@@ -155,49 +171,36 @@ def worker_main_loop():
                 # A. Status da CHUVA
                 status_chuva_txt = "SEM DADOS"
                 acumulado_72h_df = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
-
                 if not acumulado_72h_df.empty and not pd.isna(acumulado_72h_df['chuva_mm'].iloc[-1]):
                     chuva_72h_final = acumulado_72h_df['chuva_mm'].iloc[-1]
                     status_chuva_txt, _ = processamento.definir_status_chuva(chuva_72h_final)
 
                 # B. Status da UMIDADE
                 status_umidade_txt = "LIVRE"
-
                 if not df_ponto.empty:
                     try:
-                        # --- INÍCIO DA CORREÇÃO (Cálculo da Base) ---
-                        # A base agora é calculada usando o histórico completo do ponto
-
                         df_ponto_umidade = df_ponto.dropna(
                             subset=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
 
                         if df_ponto_umidade.empty:
-                            # Usa o padrão se não houver dados de umidade
                             base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
                             base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
                             base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
                         else:
-                            # A base é o valor MÍNIMO (o mais seco) já registrado
                             base_1m = df_ponto_umidade['umidade_1m_perc'].min()
                             base_2m = df_ponto_umidade['umidade_2m_perc'].min()
                             base_3m = df_ponto_umidade['umidade_3m_perc'].min()
 
-                        # Pega o último dado válido
                         ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
-                        # --- FIM DA CORREÇÃO (Cálculo da Base) ---
-
                         status_umidade_tuple = processamento.definir_status_umidade_hierarquico(
                             ultimo_dado.get('umidade_1m_perc'),
                             ultimo_dado.get('umidade_2m_perc'),
                             ultimo_dado.get('umidade_3m_perc'),
                             base_1m, base_2m, base_3m
                         )
-
                         texto_status_umidade = status_umidade_tuple[0]
-
                         if texto_status_umidade not in ["SEM DADOS", "INDEFINIDO", "ERRO"]:
                             status_umidade_txt = texto_status_umidade
-
                     except IndexError:
                         pass
                     except Exception as e_umid:
@@ -207,13 +210,10 @@ def worker_main_loop():
                 # C. Define o Status Final (O mais grave vence)
                 risco_chuva = RISCO_MAP.get(status_chuva_txt, -1)
                 risco_umidade = RISCO_MAP.get(status_umidade_txt, -1)
-
                 status_final_txt = status_chuva_txt
                 if risco_umidade > risco_chuva:
                     status_final_txt = status_umidade_txt
-
                 status_atualizado[id_ponto] = status_final_txt
-
             # --- FIM DO CÁLCULO DE STATUS ---
 
         # 5. Verificar alertas
@@ -239,15 +239,38 @@ def worker_main_loop():
 
 
 def background_task_wrapper():
-    # ... (Esta função permanece EXATAMENTE IGUAL) ...
+    """
+    Função que inicia a thread.
+    Executa o backfill pesado de umidade UMA VEZ.
+    Depois, entra no loop leve de 15 minutos.
+    """
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
+
+    # --- INÍCIO DA NOVA LÓGICA (Backfill Único no Deploy) ---
+    try:
+        print("[Worker Startup] Executando backfill único de Umidade Zentra (1 dia)...")
+        # Lê o histórico atual para passar para a função de backfill
+        historico_df, _, _ = data_source.get_all_data_from_disk()
+
+        # Chama a função de backfill pesado (que agora só busca 1 dia, conforme data_source.py)
+        data_source.backfill_zentra_km72_data(historico_df)
+
+        print("[Worker Startup] Backfill único de Umidade Zentra concluído.")
+    except Exception as e_startup_backfill:
+        print(f"[Worker Startup] ERRO no backfill único de Umidade: {e_startup_backfill}")
+        data_source.adicionar_log("GERAL", f"ERRO (Startup Backfill Zentra): {e_startup_backfill}")
+    # --- FIM DA NOVA LÓGICA ---
+
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
     while True:
         inicio_total = time.time()
+
+        # Roda o loop LEVE (que não tem mais o backfill de umidade)
         worker_main_loop()
+
         tempo_execucao = time.time() - inicio_total
         agora_utc = datetime.datetime.now(datetime.timezone.utc)
         minutos_restantes = INTERVALO_EM_MINUTOS - (agora_utc.minute % INTERVALO_EM_MINUTOS)
@@ -388,6 +411,7 @@ def update_data_and_logs_from_disk(n_intervals):
 data_source.setup_disk_paths()
 if not os.environ.get("WERKZEUG_MAIN"):
     print("Iniciando o worker (coletor de dados) em um thread separado...")
+    # --- MODIFICADO: A thread agora chama a nova função wrapper ---
     worker_thread = Thread(target=background_task_wrapper, daemon=True)
     worker_thread.start()
 else:
