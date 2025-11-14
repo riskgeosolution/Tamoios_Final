@@ -1,4 +1,4 @@
-# data_source.py (COMPLETO E CORRIGIDO)
+# data_source.py (COMPLETO, com Patch de TIMEOUT)
 
 import pandas as pd
 import json
@@ -444,8 +444,13 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
     }
     headers = {"Authorization": f"Token {ZENTRA_API_TOKEN}"}
     try:
-        response = client.get(url, headers=headers, params=params, timeout=30.0)
+        # --- INÍCIO DA ALTERAÇÃO (Adiciona timeout=15.0) ---
+        response = client.get(url, headers=headers, params=params, timeout=15.0)
+        # --- FIM DA ALTERAÇÃO ---
         return response
+    except httpx.TimeoutException: # --- ADICIONADO ---
+        print(f"ERRO DE TIMEOUT ZENTRA: A API demorou mais de 15s para responder (IP pode estar bloqueado).") # --- ADICIONADO ---
+        return None # --- ADICIONADO ---
     except httpx.RequestError as e:
         print(f"ERRO DE CONEXÃO ZENTRA: {e}")
         return None
@@ -479,10 +484,10 @@ def fetch_data_from_zentra_cloud():
 
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
 
-            if response is None:  # Erro de conexão
-                adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra: Falha de conexão.")
-                time.sleep(10)  # Espera curta para falha de conexão
-                continue
+            if response is None:  # Erro de conexão ou TIMEOUT
+                adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra: Falha de conexão ou Timeout.")
+                # Não tentamos novamente em caso de timeout, falhamos rápido
+                return None
 
             if response.status_code == 200:
                 print("[API Zentra] Sucesso na requisição (Incremental).")
@@ -620,10 +625,10 @@ def backfill_zentra_km72_data(df_historico_existente):
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
             # ----------------------------------------------------
 
-            if response is None:
-                adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão.")
-                time.sleep(10)
-                continue
+            if response is None: # Erro de conexão ou TIMEOUT
+                adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão ou Timeout.")
+                # Não tentamos novamente em caso de timeout, falhamos rápido
+                return
 
             if response.status_code == 200:
                 print("[API Zentra Backfill] Sucesso na requisição.")

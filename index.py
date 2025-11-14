@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v5: Backfill de Umidade Único no Deploy)
+# index.py (COMPLETO, v6: Reverte para o modo "somente incremental" v4)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -241,34 +241,24 @@ def worker_main_loop():
 def background_task_wrapper():
     """
     Função que inicia a thread.
-    Executa o backfill pesado de umidade UMA VEZ.
-    Depois, entra no loop leve de 15 minutos.
+    NÃO faz backfill pesado no início.
+    Entra DIRETAMENTE no loop leve de 15 minutos.
     """
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
 
-    # --- INÍCIO DA NOVA LÓGICA (Backfill Único no Deploy) ---
-    try:
-        print("[Worker Startup] Executando backfill único de Umidade Zentra (1 dia)...")
-        # Lê o histórico atual para passar para a função de backfill
-        historico_df, _, _ = data_source.get_all_data_from_disk()
-
-        # Chama a função de backfill pesado (que agora só busca 1 dia, conforme data_source.py)
-        data_source.backfill_zentra_km72_data(historico_df)
-
-        print("[Worker Startup] Backfill único de Umidade Zentra concluído.")
-    except Exception as e_startup_backfill:
-        print(f"[Worker Startup] ERRO no backfill único de Umidade: {e_startup_backfill}")
-        data_source.adicionar_log("GERAL", f"ERRO (Startup Backfill Zentra): {e_startup_backfill}")
-    # --- FIM DA NOVA LÓGICA ---
+    # --- INÍCIO DA CORREÇÃO (REMOVIDO BACKFILL INICIAL) ---
+    # A lógica de backfill pesado foi removida daqui
+    # para evitar o travamento (deadlock) no deploy.
+    # --- FIM DA CORREÇÃO ---
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
     while True:
         inicio_total = time.time()
 
-        # Roda o loop LEVE (que não tem mais o backfill de umidade)
+        # Roda o loop LEVE
         worker_main_loop()
 
         tempo_execucao = time.time() - inicio_total
