@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA)
+# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA CORRIGIDA)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -157,28 +157,28 @@ def worker_main_loop():
         # SEGUNDO: Coleta incremental da Zentra (Umidade)
         dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
 
-        # --- INÍCIO DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA) ---
+        # --- INÍCIO DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA com TRAVA DE 6H) ---
 
-        # Esta secção agora calcula a nova base e anexa TUDO (umidade E base)
         if dados_umidade_km72_inc:
             # Recarrega o histórico (que agora inclui a linha da WeatherLink)
             historico_df, _, _ = data_source.get_all_data_from_disk()
-            df_km72_hist = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
+            df_km72_hist = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72].copy()
+
+            # Garante que o timestamp está em formato datetime para o processamento
+            if not df_km72_hist.empty:
+                df_km72_hist['timestamp'] = pd.to_datetime(df_km72_hist['timestamp'])
 
             if not df_km72_hist.empty:
 
                 # 1. Encontrar a base anterior
-                # Pega o último dado válido (não-nulo) de base
                 df_bases_validas = df_km72_hist.dropna(subset=['base_1m', 'base_2m', 'base_3m'])
 
                 if df_bases_validas.empty:
-                    # Primeiro run, usa as constantes do config
                     print("[Worker] Primeiro run ou bases nulas. Usando valores estáticos do config.")
                     old_base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
                     old_base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
                     old_base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
                 else:
-                    # Pega a base mais recente que foi salva
                     ultimo_dado_base = df_bases_validas.sort_values('timestamp').iloc[-1]
                     old_base_1m = ultimo_dado_base['base_1m']
                     old_base_2m = ultimo_dado_base['base_2m']
@@ -191,29 +191,31 @@ def worker_main_loop():
                 new_sensor_1m = dados_umidade_km72_inc.get('umidade_1m_perc')
                 if new_sensor_1m is not None:
                     novos_dados_para_salvar['umidade_1m_perc'] = new_sensor_1m
-                    # Aplica a regra: se o novo valor for menor, ele é a nova base
-                    if new_sensor_1m < old_base_1m:
-                        novos_dados_para_salvar['base_1m'] = new_sensor_1m
-                    else:
-                        novos_dados_para_salvar['base_1m'] = old_base_1m
+                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
+                    new_base_1m = processamento.verificar_trava_base(
+                        df_km72_hist, 'umidade_1m_perc', new_sensor_1m, old_base_1m, horas=6
+                    )
+                    novos_dados_para_salvar['base_1m'] = new_base_1m
 
                 # Sensor 2m
                 new_sensor_2m = dados_umidade_km72_inc.get('umidade_2m_perc')
                 if new_sensor_2m is not None:
                     novos_dados_para_salvar['umidade_2m_perc'] = new_sensor_2m
-                    if new_sensor_2m < old_base_2m:
-                        novos_dados_para_salvar['base_2m'] = new_sensor_2m
-                    else:
-                        novos_dados_para_salvar['base_2m'] = old_base_2m
+                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
+                    new_base_2m = processamento.verificar_trava_base(
+                        df_km72_hist, 'umidade_2m_perc', new_sensor_2m, old_base_2m, horas=6
+                    )
+                    novos_dados_para_salvar['base_2m'] = new_base_2m
 
                 # Sensor 3m
                 new_sensor_3m = dados_umidade_km72_inc.get('umidade_3m_perc')
                 if new_sensor_3m is not None:
                     novos_dados_para_salvar['umidade_3m_perc'] = new_sensor_3m
-                    if new_sensor_3m < old_base_3m:
-                        novos_dados_para_salvar['base_3m'] = new_sensor_3m
-                    else:
-                        novos_dados_para_salvar['base_3m'] = old_base_3m
+                    # CHAMA A NOVA FUNÇÃO DE TRAVA (6 horas)
+                    new_base_3m = processamento.verificar_trava_base(
+                        df_km72_hist, 'umidade_3m_perc', new_sensor_3m, old_base_3m, horas=6
+                    )
+                    novos_dados_para_salvar['base_3m'] = new_base_3m
 
                 # 3. Encontrar a linha para atualizar
                 ts_recente = df_km72_hist['timestamp'].max()
@@ -229,8 +231,8 @@ def worker_main_loop():
                         historico_df.at[idx, coluna] = valor
 
                     print(
-                        f"[Worker] Dados Zentra (Incremental) e Bases Dinâmicas anexadas ao Ponto {ID_PONTO_ZENTRA_KM72}.")
-                    print(f"Bases Atualizadas: { {k: v for k, v in novos_dados_para_salvar.items() if 'base' in k} }")
+                        f"[Worker] Dados Zentra (Incremental) e Bases Dinâmicas (Trava 6h) anexadas ao Ponto {ID_PONTO_ZENTRA_KM72}.")
+                    # (O log de mudança de base agora está dentro da função 'verificar_trava_base')
 
                     # Salva o DF atualizado
                     data_source.save_historico_to_csv(historico_df)

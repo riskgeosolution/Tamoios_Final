@@ -1,16 +1,14 @@
-# processamento.py (CORRIGIDO v2: Corrigindo Importação Circular)
+# processamento.py (CORRIGIDO v3: Adicionada função de trava de 6h)
 
 import pandas as pd
 import datetime
 import traceback  # Importar traceback
 
-# --- REMOVIDO: import data_source ---
-
 # --- Importações Corrigidas ---
 from config import (
     CHUVA_LIMITE_VERDE, CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA,
     DELTA_TRIGGER_UMIDADE, RISCO_MAP, STATUS_MAP_HIERARQUICO,
-    FREQUENCIA_API_SEGUNDOS  # Importa a frequência
+    FREQUENCIA_API_SEGUNDOS
 )
 
 
@@ -192,3 +190,61 @@ def ler_logs_eventos(id_ponto):
 
     except Exception as e:
         return f"ERRO ao ler logs: {e}"
+
+
+# --- INÍCIO DA NOVA FUNÇÃO (TRAVA DE SEGURANÇA DA BASE) ---
+def verificar_trava_base(df_historico_ponto, coluna_umidade, nova_leitura, base_antiga, horas=6):
+    """
+    Verifica se uma nova leitura baixa deve se tornar a nova base,
+    exigindo que todas as leituras nas últimas X horas também estejam abaixo da base antiga.
+    """
+    try:
+        # 1. Se a nova leitura não for um gatilho (não for menor), a base antiga é mantida.
+        if nova_leitura >= base_antiga:
+            return base_antiga  # Retorna a base antiga (sem mudança)
+
+        # 2. GATILHO: A nova leitura é menor. Agora, verifique as últimas 6 horas.
+
+        # Pega o timestamp mais recente do histórico
+        if df_historico_ponto.empty or 'timestamp' not in df_historico_ponto.columns:
+            # Não há histórico (primeiro run), mas a nova leitura é menor que a base padrão.
+            # Neste caso, devemos assumir que é a nova base (pois não há histórico para verificar).
+            print(f"[{coluna_umidade}] Primeiro registro é menor que a base. Definindo nova base: {nova_leitura}")
+            return nova_leitura
+
+            # Pega o timestamp mais recente do DF
+        ultimo_timestamp_no_df = df_historico_ponto['timestamp'].max()
+        # Define o limite de 6 horas atrás
+        limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=horas)
+
+        # Filtra o histórico para as últimas 6 horas (excluindo a nova leitura)
+        df_ultimas_horas = df_historico_ponto[df_historico_ponto['timestamp'] >= limite_tempo]
+
+        # Pega a série de dados de umidade, removendo valores nulos (NaN)
+        serie_umidade_historica = df_ultimas_horas[coluna_umidade].dropna()
+
+        # 3. Verifica se TODO o histórico recente está abaixo da base antiga
+
+        if not serie_umidade_historica.empty:
+            # .all() verifica se TODOS os valores são True
+            if not (serie_umidade_historica < base_antiga).all():
+                # Se *qualquer* valor histórico nas últimas 6h for >= à base antiga, a trava falha.
+                # O solo "se recuperou" nesse período, então foi um spike ou evento curto.
+                print(
+                    f"[{coluna_umidade}] GATILHO FALHOU: Nova leitura {nova_leitura} é baixa, mas dados nas últimas {horas}h não estavam. Mantendo base {base_antiga}.")
+                return base_antiga  # Retorna a base antiga (sem mudança)
+
+        # 4. Se chegou aqui:
+        # (A) A nova leitura é < base_antiga (verificado no Passo 1)
+        # (B) Todo o histórico das últimas 6h também é < base_antiga (verificado no Passo 3)
+        # A trava de 6 horas foi satisfeita.
+        print(
+            f"[{coluna_umidade}] GATILHO SUCESSO: Trava de {horas}h satisfeita. Nova base definida: {nova_leitura} (era {base_antiga})")
+        return nova_leitura  # Retorna a nova base!
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO (verificar_trava_base) para {coluna_umidade}: {e}")
+        traceback.print_exc()
+        # FAIL-SAFE: Em caso de erro, NUNCA mude a base.
+        return base_antiga
+# --- FIM DA NOVA FUNÇÃO ---
