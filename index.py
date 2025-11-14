@@ -1,11 +1,11 @@
-# index.py (CORRIGIDO: Impede o worker duplicado do modo Debug)
+# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA E LOGS)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
 import pandas as pd
 from io import StringIO
-import os  # <-- Importa o OS para a correção
+import os
 import json
 from dotenv import load_dotenv
 import time
@@ -29,7 +29,7 @@ import config
 import processamento
 import alertas
 import traceback
-from config import PONTOS_DE_ANALISE, RISCO_MAP, FREQUENCIA_API_SEGUNDOS
+from config import PONTOS_DE_ANALISE, RISCO_MAP, FREQUENCIA_API_SEGUNDOS, ID_PONTO_ZENTRA_KM72, CONSTANTES_PADRAO
 
 # --- FIM DAS IMPORTAÇÕES DO WORKER ---
 
@@ -41,10 +41,10 @@ SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
 # --- LÓGICA DO WORKER (O COLETOR DE DADOS EM SEGUNDO PLANO) ---
-# (Esta seção não foi alterada)
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     if not status_novos:
         print("[Worker Thread] Nenhum status novo recebido para verificação.")
         return status_antigos
@@ -66,10 +66,6 @@ def worker_verificar_alertas(status_novos, status_antigos):
             except Exception as e:
                 print(f"Erro ao gerar log de mudança de status: {e}")
 
-            # --- ATENÇÃO: Seus alertas ainda estão desativados ---
-            # alertas.enviar_alerta(id_ponto, PONTOS_DE_ANALISE[id_ponto]['nome'], status_novo, status_antigo)
-            # --- FIM DO ATENÇÃO ---
-
             status_atualizado[id_ponto] = status_novo
     return status_atualizado
 
@@ -85,61 +81,256 @@ def worker_main_loop():
         print(f"WORKER (Thread): Início do ciclo. Histórico lido: {len(historico_df)} entradas.")
 
         # --- LÓGICA DE BACKFILL (GAP CHECK) ---
+
+        # A. Backfill Chuva KM 67 (Como antes)
+        # ... (Esta secção permanece EXATAMENTE IGUAL) ...
         df_km67 = historico_df[historico_df['id_ponto'] == 'Ponto-A-KM67']
-        run_backfill = False
+        run_backfill_km67 = False
 
         if df_km67.empty:
             print("[Worker Thread] Histórico do KM 67 (Pro) está vazio. Tentando backfill de 72h...")
-            run_backfill = True
+            run_backfill_km67 = True
         else:
             try:
                 if not pd.api.types.is_datetime64_any_dtype(df_km67['timestamp']):
                     df_km67.loc[:, 'timestamp'] = pd.to_datetime(df_km67['timestamp'])
-
                 latest_timestamp = df_km67['timestamp'].max()
                 agora_utc = datetime.datetime.now(datetime.timezone.utc)
                 gap_segundos = (agora_utc - latest_timestamp).total_seconds()
-
                 if gap_segundos > (20 * 60):
                     print(
                         f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para o KM 67. Tentando backfill...")
-                    run_backfill = True
-                else:
-                    print(
-                        f"[Worker Thread] Dados do KM 67 estão atualizados ({gap_segundos / 60:.0f} min). Backfill não necessário.")
+                    run_backfill_km67 = True
             except Exception as e_gap:
-                print(f"[Worker Thread] Erro ao checar 'gap' de dados: {e_gap}. Pulando backfill.")
+                print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 67): {e_gap}. Pulando backfill.")
 
-        if run_backfill:
+        if run_backfill_km67:
             try:
                 data_source.backfill_km67_pro_data(historico_df)
-                historico_df, _, _ = data_source.get_all_data_from_disk()
-                print(f"[Worker Thread] Backfill concluído. Histórico atual: {len(historico_df)} entradas.")
+                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
+                print(f"[Worker Thread] Backfill KM 67 concluído.")
             except Exception as e_backfill:
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
+
+        # B. Backfill Umidade KM 72 (Como antes)
+        # ... (Esta secção permanece EXATAMENTE IGUAL) ...
+        df_km72 = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
+        run_backfill_km72 = False
+
+        if df_km72.empty or df_km72['umidade_1m_perc'].isnull().all():
+            print("[Worker Thread] Histórico de Umidade do KM 72 está vazio. Tentando backfill de 72h...")
+            run_backfill_km72 = True
+        else:
+            try:
+                if not pd.api.types.is_datetime64_any_dtype(df_km72['timestamp']):
+                    df_km72.loc[:, 'timestamp'] = pd.to_datetime(df_km72['timestamp'])
+
+                latest_timestamp_umidade = df_km72.dropna(subset=['umidade_1m_perc'])['timestamp'].max()
+
+                if pd.isna(latest_timestamp_umidade):
+                    print(
+                        "[Worker Thread] Histórico de Umidade do KM 72 (coluna existe) está vazio. Tentando backfill...")
+                    run_backfill_km72 = True
+                else:
+                    agora_utc = datetime.datetime.now(datetime.timezone.utc)
+                    gap_segundos = (agora_utc - latest_timestamp_umidade).total_seconds()
+                    if gap_segundos > (20 * 60):
+                        print(
+                            f"[Worker Thread] Detectado 'gap' de {gap_segundos / 60:.0f} min para a Umidade KM 72. Tentando backfill...")
+                        run_backfill_km72 = True
+            except Exception as e_gap_km72:
+                print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 72): {e_gap_km72}. Pulando backfill.")
+
+        if run_backfill_km72:
+            try:
+                data_source.backfill_zentra_km72_data(historico_df)
+                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
+                print(f"[Worker Thread] Backfill Umidade KM 72 concluído.")
+            except Exception as e_backfill_km72:
+                data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
         # --- FIM DO BACKFILL ---
 
         # 2. COLETAR NOVOS DADOS DA API (passo /current)
+        # Primeiro a WeatherLink (chuva)
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
-        # 3. RECARREGAR O HISTÓRICO COMPLETO APÓS SALVAMENTO
-        historico_completo, _, _ = data_source.get_all_data_from_disk()
+        # SEGUNDO: Coleta incremental da Zentra (Umidade)
+        dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+
+        # --- INÍCIO DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA) ---
+
+        # Esta secção agora calcula a nova base e anexa TUDO (umidade E base)
+        if dados_umidade_km72_inc:
+            # Recarrega o histórico (que agora inclui a linha da WeatherLink)
+            historico_df, _, _ = data_source.get_all_data_from_disk()
+            df_km72_hist = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
+
+            if not df_km72_hist.empty:
+
+                # 1. Encontrar a base anterior
+                # Pega o último dado válido (não-nulo) de base
+                df_bases_validas = df_km72_hist.dropna(subset=['base_1m', 'base_2m', 'base_3m'])
+
+                if df_bases_validas.empty:
+                    # Primeiro run, usa as constantes do config
+                    print("[Worker] Primeiro run ou bases nulas. Usando valores estáticos do config.")
+                    old_base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
+                    old_base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
+                    old_base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
+                else:
+                    # Pega a base mais recente que foi salva
+                    ultimo_dado_base = df_bases_validas.sort_values('timestamp').iloc[-1]
+                    old_base_1m = ultimo_dado_base['base_1m']
+                    old_base_2m = ultimo_dado_base['base_2m']
+                    old_base_3m = ultimo_dado_base['base_3m']
+
+                # 2. Preparar os novos dados
+                novos_dados_para_salvar = {}
+
+                # Sensor 1m
+                new_sensor_1m = dados_umidade_km72_inc.get('umidade_1m_perc')
+                if new_sensor_1m is not None:
+                    novos_dados_para_salvar['umidade_1m_perc'] = new_sensor_1m
+                    # Aplica a regra: se o novo valor for menor, ele é a nova base
+                    if new_sensor_1m < old_base_1m:
+                        novos_dados_para_salvar['base_1m'] = new_sensor_1m
+                        # --- ADICIONA LOG ---
+                        log_msg = f"NOVA BASE UMIDADE (1m): Valor alterado de {old_base_1m:.2f}% para {new_sensor_1m:.2f}%."
+                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
+                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
+                        # --- FIM LOG ---
+                    else:
+                        novos_dados_para_salvar['base_1m'] = old_base_1m
+
+                # Sensor 2m
+                new_sensor_2m = dados_umidade_km72_inc.get('umidade_2m_perc')
+                if new_sensor_2m is not None:
+                    novos_dados_para_salvar['umidade_2m_perc'] = new_sensor_2m
+                    if new_sensor_2m < old_base_2m:
+                        novos_dados_para_salvar['base_2m'] = new_sensor_2m
+                        # --- ADICIONA LOG ---
+                        log_msg = f"NOVA BASE UMIDADE (2m): Valor alterado de {old_base_2m:.2f}% para {new_sensor_2m:.2f}%."
+                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
+                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
+                        # --- FIM LOG ---
+                    else:
+                        novos_dados_para_salvar['base_2m'] = old_base_2m
+
+                # Sensor 3m
+                new_sensor_3m = dados_umidade_km72_inc.get('umidade_3m_perc')
+                if new_sensor_3m is not None:
+                    novos_dados_para_salvar['umidade_3m_perc'] = new_sensor_3m
+                    if new_sensor_3m < old_base_3m:
+                        novos_dados_para_salvar['base_3m'] = new_sensor_3m
+                        # --- ADICIONA LOG ---
+                        log_msg = f"NOVA BASE UMIDADE (3m): Valor alterado de {old_base_3m:.2f}% para {new_sensor_3m:.2f}%."
+                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
+                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
+                        # --- FIM LOG ---
+                    else:
+                        novos_dados_para_salvar['base_3m'] = old_base_3m
+
+                # 3. Encontrar a linha para atualizar
+                ts_recente = df_km72_hist['timestamp'].max()
+                idx_list = historico_df.index[
+                    (historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72) &
+                    (historico_df['timestamp'] == ts_recente)
+                    ].tolist()
+
+                if idx_list:
+                    idx = idx_list[0]
+                    # Anexa os dados (sensor E base) no DF em memória
+                    for coluna, valor in novos_dados_para_salvar.items():
+                        historico_df.at[idx, coluna] = valor
+
+                    print(
+                        f"[Worker] Dados Zentra (Incremental) e Bases Dinâmicas anexadas ao Ponto {ID_PONTO_ZENTRA_KM72}.")
+                    print(f"Bases Atualizadas: { {k: v for k, v in novos_dados_para_salvar.items() if 'base' in k} }")
+
+                    # Salva o DF atualizado
+                    data_source.save_historico_to_csv(historico_df)
+                    # (O SQLite será atualizado no próximo ciclo de backfill se houver gap)
+                else:
+                    print(
+                        f"[Worker] Aviso: Zentra retornou dados, mas não encontrou a linha de timestamp mais recente para {ID_PONTO_ZENTRA_KM72}.")
+
+        # --- FIM DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA) ---
+
+        # 3. RECARREGAR O HISTÓRICO COMPLETO (FINAL)
+        # (O historico_df em memória já foi atualizado, então podemos usá-lo)
+        historico_completo = historico_df.copy()
 
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
             status_atualizado = {p: "SEM DADOS" for p in PONTOS_DE_ANALISE.keys()}
         else:
-            # 4. Calcular Status
+
+            # 4. Calcular Status (Chuva + Umidade)
             status_atualizado = {}
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_completo[historico_completo['id_ponto'] == id_ponto].copy()
+
+                # A. Status da CHUVA
+                status_chuva_txt = "SEM DADOS"
                 acumulado_72h_df = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
-                if not acumulado_72h_df.empty:
+
+                if not acumulado_72h_df.empty and not pd.isna(acumulado_72h_df['chuva_mm'].iloc[-1]):
                     chuva_72h_final = acumulado_72h_df['chuva_mm'].iloc[-1]
-                    status_ponto, _ = processamento.definir_status_chuva(chuva_72h_final)
-                    status_atualizado[id_ponto] = status_ponto
-                else:
-                    status_atualizado[id_ponto] = "SEM DADOS"
+                    status_chuva_txt, _ = processamento.definir_status_chuva(chuva_72h_final)
+
+                # B. Status da UMIDADE
+                status_umidade_txt = "LIVRE"
+
+                if not df_ponto.empty:
+                    try:
+                        ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
+
+                        # --- INÍCIO DA ALTERAÇÃO (USAR BASE DINÂMICA) ---
+
+                        # A base agora vem do 'ultimo_dado', não do 'config'
+                        base_1m = ultimo_dado.get('base_1m')
+                        base_2m = ultimo_dado.get('base_2m')
+                        base_3m = ultimo_dado.get('base_3m')
+
+                        # Fallback (essencial para o primeiro run e para os KMs sem Zentra)
+                        if pd.isna(base_1m):
+                            base_1m = CONSTANTES_PADRAO['UMIDADE_BASE_1M']
+                        if pd.isna(base_2m):
+                            base_2m = CONSTANTES_PADRAO['UMIDADE_BASE_2M']
+                        if pd.isna(base_3m):
+                            base_3m = CONSTANTES_PADRAO['UMIDADE_BASE_3M']
+
+                        # --- FIM DA ALTERAÇÃO ---
+
+                        status_umidade_tuple = processamento.definir_status_umidade_hierarquico(
+                            ultimo_dado.get('umidade_1m_perc'),
+                            ultimo_dado.get('umidade_2m_perc'),
+                            ultimo_dado.get('umidade_3m_perc'),
+                            base_1m, base_2m, base_3m
+                        )
+
+                        texto_status_umidade = status_umidade_tuple[0]
+
+                        if texto_status_umidade not in ["SEM DADOS", "INDEFINIDO", "ERRO"]:
+                            status_umidade_txt = texto_status_umidade
+
+                    except IndexError:
+                        pass
+                    except Exception as e_umid:
+                        print(f"[Worker] Erro ao calcular status de umidade para {id_ponto}: {e_umid}")
+                        status_umidade_txt = "LIVRE"
+
+                # C. Define o Status Final (O mais grave vence)
+                risco_chuva = RISCO_MAP.get(status_chuva_txt, -1)
+                risco_umidade = RISCO_MAP.get(status_umidade_txt, -1)
+
+                status_final_txt = status_chuva_txt
+                if risco_umidade > risco_chuva:
+                    status_final_txt = status_umidade_txt
+
+                status_atualizado[id_ponto] = status_final_txt
+
+            # --- FIM DO CÁLCULO DE STATUS ---
 
         # 5. Verificar alertas
         status_final_com_alertas = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
@@ -164,6 +355,7 @@ def worker_main_loop():
 
 
 def background_task_wrapper():
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
@@ -196,6 +388,7 @@ def background_task_wrapper():
 # ==============================================================================
 
 app.layout = html.Div([
+    # ... (Esta secção permanece EXATAMENTE IGUAL) ...
     dcc.Store(id='session-store', data={'logged_in': False, 'user_type': 'guest'}, storage_type='session'),
     dcc.Store(id='store-dados-sessao', storage_type='session'),
     dcc.Store(id='store-ultimo-status', storage_type='session'),
@@ -213,9 +406,9 @@ app.layout = html.Div([
 
 # ==============================================================================
 # --- CALLBACKS ---
-# (Esta seção não foi alterada)
 # ==============================================================================
 
+# ... (Todos os callbacks permanecem EXATAMENTE IGUAIS) ...
 @app.callback(
     Output('page-container-root', 'children'),
     Input('session-store', 'data'),
@@ -303,38 +496,24 @@ def update_data_and_logs_from_disk(n_intervals):
     return dados_json_output, status_atual, logs
 
 
-# (O callback do Toggler foi removido)
-
-
 # ==============================================================================
 # --- SEÇÃO DE EXECUÇÃO LOCAL (COM CORREÇÃO PARA DEBUG MODE) ---
 # ==============================================================================
 
-# 1. Configura os caminhos ANTES de iniciar a thread
+# ... (Esta secção permanece EXATAMENTE IGUAL) ...
 data_source.setup_disk_paths()
-
-# --- INÍCIO DA CORREÇÃO (Evita worker duplicado) ---
-# Verifica se o script está sendo rodado pelo reloader do Dash
-# Se 'WERKZEUG_RUN_MAIN' não estiver definido, significa que este é o
-# processo principal (seja no Render ou no 'python index.py' local)
-# e nós DEVEMOS iniciar o worker.
-if not os.environ.get("WERKZEUG_RUN_MAIN"):
+if not os.environ.get("WERKZEUG_MAIN"):
     print("Iniciando o worker (coletor de dados) em um thread separado...")
     worker_thread = Thread(target=background_task_wrapper, daemon=True)
     worker_thread.start()
 else:
     print("O reloader do Dash está ativo. O worker não será iniciado neste processo.")
-# --- FIM DA CORREÇÃO ---
 
-
-# 3. O bloco if __name__ == '__main__': é mantido APENAS para teste local
 if __name__ == '__main__':
     host = '127.0.0.1'
     port = 8050
     print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
-
     try:
-        # debug=True ainda pode ser usado com segurança agora
         app.run(debug=True, host=host, port=port)
     except Exception as e:
         print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")

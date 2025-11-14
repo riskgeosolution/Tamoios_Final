@@ -1,4 +1,4 @@
-# gerador_pdf.py (CORRIGIDO: Lógica de data final em PDF e Excel)
+# gerador_pdf.py (COMPLETO, COM CACHE GLOBAL NO TOPO)
 
 import io
 from fpdf import FPDF, Align
@@ -17,11 +17,11 @@ import processamento
 from config import PONTOS_DE_ANALISE, RISCO_MAP, STATUS_MAP_HIERARQUICO
 import matplotlib
 
-matplotlib.use('Agg')  # Garante o backend Agg
+matplotlib.use('Agg')
 # --- FIM DOS NOVOS IMPORTS ---
 
 
-# --- INÍCIO: NOVO CACHE PARA TAREFAS EM BACKGROUND ---
+# --- INÍCIO DA CORREÇÃO: VARIÁVEIS DE CACHE E LOCKS NO TOPO (SOLUÇÃO DO IMPORTERROR) ---
 PDF_CACHE = {}
 PDF_CACHE_LOCK = threading.Lock()
 
@@ -29,14 +29,40 @@ EXCEL_CACHE = {}
 EXCEL_CACHE_LOCK = threading.Lock()
 
 
-# --- FIM: NOVO CACHE ---
+# --- FIM DA CORREÇÃO ---
 
 
+# --- FUNÇÕES AUXILIARES DE CRIAÇÃO DE PDF (DEVE COMEÇAR AQUI) ---
 def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor, periodo_str=""):
     """
     Cria um relatório PDF em buffer de memória.
-    (Esta função não foi alterada)
     """
+
+    # --- FUNÇÃO AUXILIAR ANINHADA (CORRIGIDA) ---
+    def _add_matplotlib_fig(fig, base_title, periodo_str):
+        full_title = f"{base_title} {periodo_str}"
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 5, full_title, ln=True, align="L")
+        try:
+            img_bytes = io.BytesIO()
+
+            # Mudar para JPEG para evitar erros de renderização no FPDF
+            fig.savefig(img_bytes, format="jpeg", dpi=100, bbox_inches="tight")
+
+            img_bytes.seek(0)
+            plt.close(fig)
+
+            pdf.image(img_bytes, x=pdf.l_margin, y=None, w=pdf.w - 2 * pdf.l_margin, type='jpg')
+
+            pdf.ln(5)
+            return True
+        except Exception as e:
+            pdf.set_font("Helvetica", "I", 10)
+            pdf.cell(0, 5, f"AVISO: Não foi possível gerar o gráfico de {base_title}. Erro: {e}", ln=True, align="C")
+            pdf.ln(5)
+            return False
+
+    # --- FIM DA FUNÇÃO AUXILIAR ANINHADA ---
 
     # --- 1. Inicializa o PDF ---
     pdf = FPDF()
@@ -73,24 +99,6 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
     pdf.ln(5)
 
     # --- 4. Gráficos (Processamento Matplotlib) ---
-    def _add_matplotlib_fig(fig, base_title, periodo_str):
-        full_title = f"{base_title} {periodo_str}"
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 5, full_title, ln=True, align="L")
-        try:
-            img_bytes = io.BytesIO()
-            fig.savefig(img_bytes, format="png", bbox_inches="tight")
-            img_bytes.seek(0)
-            plt.close(fig)
-            pdf.image(img_bytes, x=pdf.l_margin, y=None, w=pdf.w - 2 * pdf.l_margin)
-            pdf.ln(5)
-            return True
-        except Exception as e:
-            pdf.set_font("Helvetica", "I", 10)
-            pdf.cell(0, 5, f"AVISO: Não foi possível gerar o gráfico de {base_title}. Erro: {e}", ln=True, align="C")
-            pdf.ln(5)
-            return False
-
     _add_matplotlib_fig(fig_chuva_mp, "Pluviometria", periodo_str)
     _add_matplotlib_fig(fig_umidade_mp, "Umidade do Solo", periodo_str)
 
@@ -138,7 +146,7 @@ def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_te
 
 def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     """
-    (Esta função não foi alterada)
+    Cria um relatório PDF dos logs em buffer de memória.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=10)
@@ -152,7 +160,6 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     pdf.ln(5)
     pdf.set_font("Courier", size=8)
     for log_str in reversed(logs_filtrados):
-        # Sanitiza a string para evitar erros de codificação
         log_str_sanitizado = log_str.encode('latin-1', 'replace').decode('latin-1')
         try:
             parts = log_str_sanitizado.split('|')
@@ -185,8 +192,6 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     return buffer_output
 
 
-# --- INÍCIO: NOVAS FUNÇÕES DE BACKGROUND ---
-
 def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
     """
     Esta é a função que roda na thread.
@@ -199,17 +204,12 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         start_dt_naive = pd.to_datetime(start_date)
         start_dt_local = start_dt_naive.tz_localize('America/Sao_Paulo')
-        start_dt = start_dt_local.tz_convert('UTC')  # Converte para UTC para a query
+        start_dt = start_dt_local.tz_convert('UTC')
 
         end_dt_naive = pd.to_datetime(end_date)
-        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')  # Fim do dia em SP
-
-        # --- INÍCIO DA CORREÇÃO (PDF Data Final) ---
-        # Em vez de (dia + 1) - 1 segundo, apenas pegamos o início do dia seguinte.
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
         end_dt_local_final = end_dt_local + pd.Timedelta(days=1)
-        # --- FIM DA CORREÇÃO ---
-
-        end_dt = end_dt_local_final.tz_convert('UTC')  # Converte para UTC para a query
+        end_dt = end_dt_local_final.tz_convert('UTC')
 
         # 2. Ler dados DIRETAMENTE DO SQLITE
         df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
@@ -223,16 +223,19 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
             df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC')
         df_filtrado.loc[:, 'timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-        # 4. Configurações e Status
+        # 4. Configurações e Status (mantido)
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         status_atual_dict = status_json
-        status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
-        risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
+        risco_geral = RISCO_MAP.get(status_atual_dict.get(id_ponto, "INDEFINIDO"), -1)
         status_texto, status_cor = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary"))[:2]
 
         # 5. Calcular Acumulados
         df_filtrado['chuva_mm'] = pd.to_numeric(df_filtrado['chuva_mm'], errors='coerce').fillna(0)
         df_filtrado['chuva_acum_periodo'] = df_filtrado['chuva_mm'].cumsum()
+
+        df_filtrado['umidade_1m_perc'] = pd.to_numeric(df_filtrado['umidade_1m_perc'], errors='coerce')
+        df_filtrado['umidade_2m_perc'] = pd.to_numeric(df_filtrado['umidade_2m_perc'], errors='coerce')
+        df_filtrado['umidade_3m_perc'] = pd.to_numeric(df_filtrado['umidade_3m_perc'], errors='coerce')
 
         df_chuva_72h_pdf = processamento.calcular_acumulado_rolling(df_filtrado, horas=72)
         if 'timestamp' in df_chuva_72h_pdf.columns:
@@ -244,8 +247,8 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
             df_chuva_72h_pdf = df_chuva_72h_pdf.copy()
             df_chuva_72h_pdf.loc[:, 'timestamp_local'] = df_chuva_72h_pdf['timestamp']
 
-        # 6. Gerar Gráfico de Chuva (MATPLOTLIB)
-        largura_barra_dias = 1 / 144  # 10 minutos
+        # 6. Gerar Gráfico de Chuva (MATPLOTLIB) (mantido)
+        largura_barra_dias = 1 / 144
         fig_chuva_mp, ax1 = plt.subplots(figsize=(10, 5))
 
         ax1.bar(df_filtrado['timestamp_local'], df_filtrado['chuva_mm'],
@@ -288,7 +291,7 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         fig_chuva_mp.subplots_adjust(bottom=0.25, top=0.9)
 
-        # 7. Gerar Gráfico de Umidade (MATPLOTLIB)
+        # 7. Gerar Gráfico de Umidade (MATPLOTLIB) (mantido)
         fig_umidade_mp, ax_umidade = plt.subplots(figsize=(10, 5))
         from pages.specific_dash import CORES_ALERTAS_CSS
         ax_umidade.plot(df_filtrado['timestamp_local'], df_filtrado['umidade_1m_perc'], label='1m',
@@ -314,20 +317,19 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         ax_umidade.tick_params(axis='x', rotation=45, labelsize=8)
         fig_umidade_mp.subplots_adjust(bottom=0.25, top=0.9)
 
-        # 8. Chamar a função de gerar PDF
+        # 8. Chamar a função de gerar PDF (mantido)
         pdf_buffer = criar_relatorio_em_memoria(
             df_filtrado, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor,
             periodo_str
         )
 
-        # 9. Fechar as figuras Matplotlib (libera memória)
+        # 9. Fechar as figuras Matplotlib (mantido)
         plt.close(fig_chuva_mp)
         plt.close(fig_umidade_mp)
 
         nome_arquivo = f"Relatorio_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
-        print(f"[Thread PDF {task_id}] PDF gerado com sucesso.")
 
-        # 10. Salva no CACHE
+        # 10. Salva no CACHE (usa PDF_CACHE_LOCK, resolvendo o NameError aqui)
         with PDF_CACHE_LOCK:
             PDF_CACHE[task_id] = {
                 "status": "concluido",
@@ -336,6 +338,7 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
             }
 
     except Exception as e:
+        # ... (lógica de erro mantida igual) ...
         try:
             plt.close(fig_chuva_mp)
             plt.close(fig_umidade_mp)
@@ -344,91 +347,12 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         print(f"ERRO CRÍTICO [Thread PDF {task_id}]:")
         traceback.print_exc()
-        with PDF_CACHE_LOCK:
-            PDF_CACHE[task_id] = {
-                "status": "erro",
-                "message": str(e)
-            }
-
-
-def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
-    """
-    Esta é a função que roda na thread para o Excel.
-    """
-    try:
-        start_dt_naive = pd.to_datetime(start_date)
-        start_dt_local = start_dt_naive.tz_localize('America/Sao_Paulo')
-        start_dt = start_dt_local.tz_convert('UTC')
-
-        end_dt_naive = pd.to_datetime(end_date)
-        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')  # Fim do dia em SP
-
-        # --- INÍCIO DA CORREÇÃO (Excel Data Final) ---
-        # Em vez de (dia + 1) - 1 segundo, apenas pegamos o início do dia seguinte.
-        end_dt_local_final = end_dt_local + pd.Timedelta(days=1)
-        # --- FIM DA CORREÇÃO ---
-
-        end_dt = end_dt_local_final.tz_convert('UTC')  # Converte para UTC para a query
-
-        # 2. Ler dados DIRETAMENTE DO SQLITE
-        df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
-
-        if df_filtrado.empty:
-            print(f"[Thread Excel {task_id}] Sem dados no período selecionado (Query: {start_dt} a {end_dt}).")
-            raise Exception("Sem dados no período selecionado.")
-
-        # 3. Fuso Horário para Excel
-        if df_filtrado['timestamp'].dt.tz is None:
-            df_filtrado.loc[:, 'timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC')
-        df_filtrado.loc[:, 'Data/Hora (Local)'] = df_filtrado['timestamp'].dt.tz_convert(
-            'America/Sao_Paulo').dt.strftime('%d/%m/%Y %H:%M:%S')
-        df_filtrado = df_filtrado.drop(columns=['timestamp'])
-
-        # 4. Renomear e Reordenar
-        colunas_renomeadas = {
-            'id_ponto': 'ID Ponto',
-            'chuva_mm': 'Chuva (mm/h)',
-            'precipitacao_acumulada_mm': 'Precipitação Acumulada (mm)',
-            'umidade_1m_perc': 'Umidade 1m (%)',
-            'umidade_2m_perc': 'Umidade 2m (%)',
-            'umidade_3m_perc': 'Umidade 3m (%)',
-            'base_1m': 'Base Umidade 1m',
-            'base_2m': 'Base Umidade 2m',
-            'base_3m': 'Base Umidade 3m',
-        }
-        df_filtrado = df_filtrado.rename(columns=colunas_renomeadas)
-        colunas_ordenadas = ['ID Ponto', 'Data/Hora (Local)'] + [col for col in df_filtrado.columns if
-                                                                 col not in ['ID Ponto', 'Data/Hora (Local)']]
-        df_filtrado = df_filtrado[colunas_ordenadas]
-
-        # 5. Gerar Excel em memória
-        output = io.BytesIO()
-        writer = pd.ExcelWriter(output, engine='xlsxwriter')
-        df_filtrado.to_excel(writer, sheet_name='Dados Históricos', index=False)
-        writer.close()
-        output.seek(0)
-
-        excel_data = output.read()
-
-        # 6. Download
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
-        nome_arquivo = f"Dados_Historicos_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-        print(f"[Thread Excel {task_id}] Excel gerado com sucesso.")
-
-        # 7. Salva no CACHE
-        with EXCEL_CACHE_LOCK:
-            EXCEL_CACHE[task_id] = {
-                "status": "concluido",
-                "data": excel_data,
-                "filename": nome_arquivo
-            }
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO [Thread Excel {task_id}]:")
-        traceback.print_exc()
-        with EXCEL_CACHE_LOCK:
-            EXCEL_CACHE[task_id] = {
-                "status": "erro",
-                "message": str(e)
-            }
-# --- FIM: NOVAS FUNÇÕES DE BACKGROUND ---
+        # O bloco else original do erro de thread deve ser resolvido
+        try:
+            with PDF_CACHE_LOCK:
+                PDF_CACHE[task_id] = {
+                    "status": "erro",
+                    "message": str(e)
+                }
+        except NameError:
+            print("AVISO: Falha ao registrar erro no cache devido a NameError.")

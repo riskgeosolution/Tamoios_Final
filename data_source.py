@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO: Adiciona detecção de "stale data" para hardware offline)
+# data_source.py (COMPLETO, COM BACKFILL DA ZENTRA)
 
 import pandas as pd
 import json
@@ -21,7 +21,11 @@ from config import (
     MAX_HISTORICO_PONTOS,
     WEATHERLINK_CONFIG,
     DB_CONNECTION_STRING,
-    DB_TABLE_NAME
+    DB_TABLE_NAME,
+
+    # --- Nossas novas importações (do Passo 1) ---
+    ZENTRA_API_TOKEN, ZENTRA_STATION_SERIAL, ZENTRA_BASE_URL,
+    MAPA_ZENTRA_KM72, ID_PONTO_ZENTRA_KM72
 )
 
 # --- Configurações de Disco (Caminhos) ---
@@ -96,6 +100,7 @@ def save_to_sqlite(df_novos_dados):
 
 
 def migrate_csv_to_sqlite_initial():
+    # ... (Esta função permanece igual) ...
     engine = get_engine()
     inspector = inspect(engine)
     try:
@@ -124,13 +129,13 @@ def migrate_csv_to_sqlite_initial():
 
 
 def read_data_from_sqlite(id_ponto, start_dt, end_dt):
+    # ... (Esta função permanece igual) ...
     print(f"[SQLite] Consultando dados para {id_ponto} de {start_dt} a {end_dt}")
     engine = get_engine()
 
     start_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
     end_str = end_dt.strftime('%Y-%m-%d %H:%M:%S')
 
-    # Query corrigida (usa < end)
     query = f"""
         SELECT * FROM {DB_TABLE_NAME}
         WHERE id_ponto = :ponto
@@ -158,6 +163,7 @@ def read_data_from_sqlite(id_ponto, start_dt, end_dt):
 # ==========================================================
 
 def read_historico_from_csv():
+    # ... (Esta função permanece igual) ...
     try:
         historico_df = pd.read_csv(HISTORICO_FILE_CSV, sep=',')
         if 'timestamp' in historico_df.columns:
@@ -177,6 +183,7 @@ def read_historico_from_csv():
 
 
 def save_historico_to_csv(df):
+    # ... (Esta função permanece igual) ...
     try:
         df_sem_duplicatas = df.sort_values(by='timestamp').drop_duplicates(
             subset=['id_ponto', 'timestamp'], keep='last')
@@ -197,6 +204,7 @@ def save_historico_to_csv(df):
 # ==========================================================
 
 def get_all_data_from_disk():
+    # ... (Esta função permanece igual) ...
     historico_df = read_historico_from_csv()
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
@@ -217,23 +225,30 @@ def get_all_data_from_disk():
 
 
 # ==========================================================
-# --- FUNÇÕES USADAS PELO WORKER.PY ---
+# --- FUNÇÕES USADAS PELO WORKER.PY (ALTERADA) ---
 # ==========================================================
 
 def executar_passo_api_e_salvar(historico_df_csv):
     try:
+        # 1. Coleta dados de CHUVA (WeatherLink) - Como antes
         dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api(historico_df_csv)
+
+        # --- ALTERAÇÃO: A coleta de Zentra incremental (fetch_data_from_zentra_cloud)
+        # --- foi MOVIDA para o index.py, para rodar *depois* do backfill.
+        # --- Esta função agora só coleta dados da WeatherLink.
+
         for log in logs_api:
             mensagem_log_completa = f"| {log['id_ponto']} | {log['mensagem']}"
             print(mensagem_log_completa)
             adicionar_log(log['id_ponto'], log['mensagem'])
+
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO (fetch_data): {e}")
         traceback.print_exc()
         return pd.DataFrame(), None
 
     if dados_api_df.empty:
-        print("[Worker] API não retornou novos dados neste ciclo.")
+        print("[Worker] API (WeatherLink) não retornou novos dados neste ciclo.")
         return pd.DataFrame(), status_novos
 
     try:
@@ -263,9 +278,10 @@ def executar_passo_api_e_salvar(historico_df_csv):
 
 
 # ==========================================================
-# --- FUNÇÕES DE ASSINATURA E COLETA de API ---
+# --- FUNÇÕES DE ASSINATURA E COLETA de API (WeatherLink) ---
 # ==========================================================
 
+# ... (funções calculate_hmac_signature_current, calculate_hmac_signature_historic, arredondar_timestamp_15min, fetch_data_from_weatherlink_api mantidas iguais) ...
 def calculate_hmac_signature_current(api_key, api_secret, t, station_id):
     params_para_assinar = {"api-key": api_key, "station-id": str(station_id), "t": str(t)}
     string_para_assinar = ""
@@ -357,21 +373,13 @@ def fetch_data_from_weatherlink_api(df_historico):
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
                     continue
 
-                # --- INÍCIO DA CORREÇÃO (Hardware Offline / Stale Data) ---
-                # 't' é o timestamp UTC de quando a requisição foi feita (em segundos)
-                # 'ts_do_sensor' é o timestamp de quando a *estação* fez a leitura (em segundos)
-                STALE_DATA_THRESHOLD_SECONDS = 20 * 60  # 20 minutos (mesma tolerância do gap-check)
+                STALE_DATA_THRESHOLD_SECONDS = 20 * 60
                 data_staleness_seconds = t - ts_do_sensor
 
                 if data_staleness_seconds > STALE_DATA_THRESHOLD_SECONDS:
-                    # Se os dados do sensor são mais velhos que 20 minutos, a estação está offline.
                     mensagem_log = f"AVISO API: Estação {id_ponto} está offline. Dados com {data_staleness_seconds // 60:.0f} min de atraso. Ignorando este ponto (será preenchido pelo backfill)."
                     logs_api.append({"id_ponto": id_ponto, "mensagem": mensagem_log})
-
-                    # Ao 'continuar', nós NÃO salvamos o dado 0.0.
-                    # Isso CRIA o "gap" que o index.py irá detectar e corrigir.
                     continue
-                # --- FIM DA CORREÇÃO ---
 
                 timestamp_arredondado = arredondar_timestamp_15min(ts_do_sensor)
 
@@ -417,7 +425,309 @@ def fetch_data_from_weatherlink_api(df_historico):
     return pd.DataFrame(dados_processados), status_calculados, logs_api
 
 
+# ==========================================================
+# --- FUNÇÃO (ZENTRA CLOUD) (INCREMENTAL) ---
+# ==========================================================
+def _get_readings_zentra(client, station_serial, start_date, end_date):
+    """Helper: Faz a requisição para a API Zentra e retorna a resposta."""
+    url = f"{ZENTRA_BASE_URL}/get_readings/"
+    params = {
+        "device_sn": station_serial,
+        "start": start_date.strftime("%Y-%m-%d"),
+        "end": end_date.strftime("%Y-%m-%d"),
+    }
+    headers = {"Authorization": f"Token {ZENTRA_API_TOKEN}"}
+    try:
+        response = client.get(url, headers=headers, params=params, timeout=30.0)
+        return response
+    except httpx.RequestError as e:
+        print(f"ERRO DE CONEXÃO ZENTRA: {e}")
+        return None
+
+
+def fetch_data_from_zentra_cloud():
+    """
+    Busca os dados de umidade mais recentes da Zentra Cloud para o KM 72.
+    Retorna um dicionário com os dados de umidade ou None em caso de falha.
+    """
+
+    # 1. Configurações
+    MAX_RETRIES = 3
+    WAIT_TIME_SECONDS = 60  # Tempo de espera após erro 429
+
+    # Otimização: Buscamos apenas o último 1 dia (incremental).
+    end_date = datetime.datetime.now(datetime.timezone.utc)
+    start_date = end_date - datetime.timedelta(days=1)
+
+    attempt = 0
+    response = None
+
+    print(
+        f"[API Zentra] Consultando leituras (INCREMENTAL 1 DIA) de {ZENTRA_STATION_SERIAL} ({start_date.date()} → {end_date.date()})")
+
+    with httpx.Client() as client:
+        while attempt < MAX_RETRIES:
+            attempt += 1
+            if attempt > 1:
+                print(f"[API Zentra] Tentativa {attempt}/{MAX_RETRIES}...")
+
+            response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
+
+            if response is None:  # Erro de conexão
+                adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra: Falha de conexão.")
+                time.sleep(10)  # Espera curta para falha de conexão
+                continue
+
+            if response.status_code == 200:
+                print("[API Zentra] Sucesso na requisição (Incremental).")
+                break  # Sai do loop de tentativas
+
+            elif response.status_code == 429:
+                adicionar_log(ID_PONTO_ZENTRA_KM72,
+                              f"AVISO API Zentra: Limite de requisições (429). Aguardando {WAIT_TIME_SECONDS}s.")
+                if attempt < MAX_RETRIES:
+                    time.sleep(WAIT_TIME_SECONDS)
+                    continue
+                else:
+                    print(f"ERRO API Zentra: Tentativas esgotadas (429).")
+                    adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra: Tentativas esgotadas (429).")
+                    return None  # Falha após retries
+
+            else:
+                print(f"ERRO FATAL API Zentra (Status {response.status_code}): {response.text}")
+                adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra (Status {response.status_code}): {response.text}")
+                return None  # Falha
+
+    if response is None or response.status_code != 200:
+        return None
+
+    try:
+        dados_json = response.json()
+        data_block = dados_json.get('data', {})
+
+        wc_data = None
+        for name, data in data_block.items():
+            if 'water content' in name.lower():
+                wc_data = data
+                break
+
+        if not wc_data:
+            adicionar_log(ID_PONTO_ZENTRA_KM72,
+                          "AVISO API Zentra: Resposta OK, mas 'Water Content' não encontrado no JSON.")
+            return None
+
+        latest_readings = {}
+
+        for sensor_block in wc_data:
+            metadata = sensor_block.get('metadata', {})
+            port_num = metadata.get('port_number')
+
+            if port_num in MAPA_ZENTRA_KM72:
+                readings = sensor_block.get('readings', [])
+                if readings:
+                    latest_value = readings[0].get('value')
+
+                    # --- CORREÇÃO (Multiplica por 100) ---
+                    if latest_value is not None:
+                        try:
+                            valor_percentual = float(latest_value) * 100.0
+                        except (ValueError, TypeError):
+                            valor_percentual = None
+                    else:
+                        valor_percentual = None
+                    # --- FIM DA CORREÇÃO ---
+
+                    coluna_destino = MAPA_ZENTRA_KM72[port_num]
+                    latest_readings[coluna_destino] = valor_percentual
+
+        if not latest_readings:
+            adicionar_log(ID_PONTO_ZENTRA_KM72,
+                          "AVISO API Zentra: 'Water Content' encontrado, mas nenhuma porta (1, 2, 3) encontrada.")
+            return None
+
+        print(f"[API Zentra] Dados de umidade (Incremental) extraídos com sucesso: {latest_readings}")
+        adicionar_log(ID_PONTO_ZENTRA_KM72, f"API Zentra: Sucesso. {len(latest_readings)} pontos de umidade lidos.")
+        return latest_readings
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO API Zentra (Processamento JSON): {e}")
+        adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO Zentra (Processamento JSON): {e}")
+        traceback.print_exc()
+        return None
+
+
+# ==========================================================
+# --- FIM: FUNÇÃO (ZENTRA CLOUD) (INCREMENTAL) ---
+# ==========================================================
+
+
+# ==========================================================
+# --- INÍCIO: NOVA FUNÇÃO (BACKFILL ZENTRA) ---
+# ==========================================================
+def backfill_zentra_km72_data(df_historico_existente):
+    """
+    Busca os últimos 3 dias (72h) de dados de umidade da Zentra Cloud
+    e os salva no banco de dados e no CSV.
+    """
+    id_ponto = ID_PONTO_ZENTRA_KM72
+    print(f"[API Zentra] Iniciando Backfill de 72h para {id_ponto}...")
+
+    # 1. Configurações
+    MAX_RETRIES = 3
+    WAIT_TIME_SECONDS = 60
+
+    # Busca 3 dias (72h) + 1 dia de margem
+    end_date = datetime.datetime.now(datetime.timezone.utc)
+    start_date = end_date - datetime.timedelta(days=3)
+
+    attempt = 0
+    response = None
+
+    with httpx.Client(timeout=60.0) as client:
+        while attempt < MAX_RETRIES:
+            attempt += 1
+            if attempt > 1:
+                print(f"[API Zentra Backfill] Tentativa {attempt}/{MAX_RETRIES}...")
+
+            response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
+
+            if response is None:
+                adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão.")
+                time.sleep(10)
+                continue
+
+            if response.status_code == 200:
+                print("[API Zentra Backfill] Sucesso na requisição.")
+                break
+
+            elif response.status_code == 429:
+                adicionar_log(id_ponto, f"AVISO API Zentra (Backfill): Limite de requisições (429).")
+                if attempt < MAX_RETRIES:
+                    time.sleep(WAIT_TIME_SECONDS)
+                    continue
+                else:
+                    adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Tentativas esgotadas (429).")
+                    return  # Falha no backfill
+
+            else:
+                adicionar_log(id_ponto, f"ERRO API Zentra (Backfill) (Status {response.status_code}): {response.text}")
+                return  # Falha no backfill
+
+    if response is None or response.status_code != 200:
+        return  # Falhou em obter os dados
+
+    # 2. Processar a resposta (JSON)
+    try:
+        dados_json = response.json()
+        data_block = dados_json.get('data', {})
+
+        wc_data = None
+        for name, data in data_block.items():
+            if 'water content' in name.lower():
+                wc_data = data
+                break
+
+        if not wc_data:
+            adicionar_log(id_ponto, "AVISO API Zentra (Backfill): 'Water Content' não encontrado.")
+            return
+
+        # Dicionário para organizar os dados por timestamp
+        # Ex: {'2025-11-13T12:00:00Z': {'umidade_1m_perc': 39.5, 'umidade_2m_perc': 43.0}}
+        dados_por_timestamp = {}
+
+        for sensor_block in wc_data:
+            metadata = sensor_block.get('metadata', {})
+            port_num = metadata.get('port_number')
+
+            if port_num in MAPA_ZENTRA_KM72:
+                coluna_destino = MAPA_ZENTRA_KM72[port_num]
+
+                for reading in sensor_block.get('readings', []):
+                    ts_str_iso = reading.get('datetime')
+                    value = reading.get('value')
+
+                    if not ts_str_iso or value is None:
+                        continue
+
+                    # Arredonda o timestamp (igual fazemos na WeatherLink)
+                    try:
+                        ts_epoch = datetime.datetime.fromisoformat(ts_str_iso).timestamp()
+                        ts_arredondado_iso = arredondar_timestamp_15min(ts_epoch)
+                    except Exception:
+                        continue  # Ignora timestamps mal formatados
+
+                    # Converte o valor para %
+                    try:
+                        valor_percentual = float(value) * 100.0
+                    except Exception:
+                        continue  # Ignora valores mal formatados
+
+                    # Adiciona ao nosso dicionário
+                    if ts_arredondado_iso not in dados_por_timestamp:
+                        dados_por_timestamp[ts_arredondado_iso] = {}
+
+                    dados_por_timestamp[ts_arredondado_iso][coluna_destino] = valor_percentual
+
+        if not dados_por_timestamp:
+            adicionar_log(id_ponto,
+                          "AVISO API Zentra (Backfill): Nenhum dado válido encontrado para as portas 1, 2, 3.")
+            return
+
+        # 3. Converter para DataFrame
+        lista_para_df = []
+        for ts, valores in dados_por_timestamp.items():
+            linha = {
+                'timestamp': ts,
+                'id_ponto': id_ponto,
+                'chuva_mm': 0.0,  # Backfill de umidade não afeta chuva
+                'umidade_1m_perc': valores.get('umidade_1m_perc'),
+                'umidade_2m_perc': valores.get('umidade_2m_perc'),
+                'umidade_3m_perc': valores.get('umidade_3m_perc'),
+            }
+            lista_para_df.append(linha)
+
+        df_backfill_zentra = pd.DataFrame(lista_para_df)
+        df_backfill_zentra['timestamp'] = pd.to_datetime(df_backfill_zentra['timestamp'], utc=True)
+
+        # 4. Salvar no SQLite e CSV
+        # (O SQLite irá ignorar duplicatas automaticamente)
+        save_to_sqlite(df_backfill_zentra)
+
+        # Para o CSV, precisamos fundir os dados
+        df_final_csv = pd.concat([df_historico_existente, df_backfill_zentra], ignore_index=True)
+        # Remove duplicatas, mantendo os dados mais recentes
+        df_final_csv = df_final_csv.sort_values(by='timestamp').drop_duplicates(
+            subset=['id_ponto', 'timestamp'], keep='last')
+
+        # Agora, precisamos "juntar" linhas que têm o mesmo timestamp e ponto
+        # (ex: uma linha da Zentra e uma da WeatherLink)
+
+        # Agrupa por timestamp e ponto, e preenche os NAs
+        # Pega o 'max': 39.5 e NA -> 39.5. / 0.0 e NA -> 0.0
+        df_agrupado = df_final_csv.groupby(['id_ponto', 'timestamp']).max().reset_index()
+
+        save_historico_to_csv(df_agrupado)
+
+        adicionar_log(id_ponto,
+                      f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade 72h salvos.")
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO API Zentra (Backfill Processamento): {e}")
+        adicionar_log(id_ponto, f"ERRO CRÍTICO Zentra (Backfill Processamento): {e}")
+        traceback.print_exc()
+
+
+# ==========================================================
+# --- FIM: NOVA FUNÇÃO (BACKFILL ZENTRA) ---
+# ==========================================================
+
+
+# ==========================================================
+# --- FUNÇÃO DE BACKFILL (WeatherLink KM 67) ---
+# ==========================================================
+
 def backfill_km67_pro_data(df_historico_existente):
+    # ... (Esta função permanece igual) ...
     id_ponto = "Ponto-A-KM67"
     station_config = WEATHERLINK_CONFIG[id_ponto]
     station_id = station_config['STATION_ID']
@@ -487,12 +797,12 @@ def backfill_km67_pro_data(df_historico_existente):
         if 'timestamp' in df_backfill.columns:
             df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
 
-        # --- LÓGICA SEGURA (append no SQLite) ---
         save_to_sqlite(df_backfill)
 
-        # --- LÓGICA SEGURA (merge no CSV) ---
         df_final_csv = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
-        save_historico_to_csv(df_final_csv)
+        # Agrupa e salva, igual fizemos no backfill da Zentra
+        df_agrupado = df_final_csv.groupby(['id_ponto', 'timestamp']).max().reset_index()
+        save_historico_to_csv(df_agrupado)
 
         adicionar_log(id_ponto,
                       f"SUCESSO (Backfill): {len(df_backfill)} registros históricos de 72h (3x 24h) salvos (CSV e SQLite).")

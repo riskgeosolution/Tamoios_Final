@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO: Adicionado indicador de acumulado dinâmico)
+# pages/specific_dash.py (COMPLETO, CORRIGINDO SYNTAXERROR)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -30,6 +30,10 @@ import processamento
 import gerador_pdf
 import data_source
 
+# --- CORREÇÃO DE IMPORTE (Do erro anterior) ---
+from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
+
+
 # --- Mapas de Cores (Mantidos) ---
 CORES_ALERTAS_CSS = {
     "verde": "green",
@@ -53,7 +57,7 @@ def get_layout():
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico (Máx 7 dias)', 'value': 7 * 24}]
 
-    return dbc.Container([
+    layout = dbc.Container([
         dcc.Store(id='store-id-ponto-ativo'),
         dcc.Store(id='store-logs-filtrados'),
         dcc.Store(id='pdf-task-id-store'),
@@ -74,23 +78,19 @@ def get_layout():
         html.Div(id='specific-dash-title', className="my-3 text-center"),
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
 
-        # --- INÍCIO DA ALTERAÇÃO (Adicionado Coluna para Acumulado Dinâmico) ---
         dbc.Row([
             dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"),
             dbc.Col(dcc.Dropdown(id='graph-time-selector', options=opcoes_tempo, value=72, clearable=False,
                                  searchable=False), width=12, lg=4),
-            # Novo container para o texto do acumulado
             dbc.Col(
                 html.Div(id='dynamic-accumulated-output'),
                 width=12, lg=4,
-                className="d-flex align-items-center"  # Alinha verticalmente
+                className="d-flex align-items-center"
             )
         ], align="center", className="my-3"),
-        # --- FIM DA ALTERAÇÃO ---
 
         dbc.Row(id='specific-dash-graphs', children=[dbc.Spinner(size="lg")], className="my-4"),
 
-        # --- Seção de Relatórios e Eventos ---
         dbc.Row([
             dbc.Col([
                 html.H5("Relatórios e Eventos", className="mb-3"),
@@ -130,7 +130,6 @@ def get_layout():
             ]),
         ], justify="center", className="mb-5"),
 
-        # Modal (Mantido)
         dbc.Modal([
             dbc.ModalHeader("Histórico de Eventos do Ponto"),
             dbc.ModalBody(dcc.Loading(children=[
@@ -146,13 +145,16 @@ def get_layout():
 
     ], fluid=True)
 
+    return layout
 
-# --- Callbacks de Plotly e Título (Não alterados) ---
+
+# --- Callbacks de Plotly e Título (Mantidos) ---
 
 @app.callback(
     Output('specific-dash-title', 'children'),
     Input('url-raiz', 'pathname')
 )
+# ... (restante do código até o fim do arquivo) ...
 def update_specific_title(pathname):
     if not pathname.startswith('/ponto/'):
         return dash.no_update
@@ -309,7 +311,8 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     # --- Fim da Lógica Central ---
 
 
-# --- Callbacks de Logs ---
+# --- Callbacks de Logs (Mantidos) ---
+
 @app.callback(
     Output('modal-logs', 'is_open'),
     [Input('btn-ver-logs', 'n_clicks'), Input('btn-fechar-logs', 'n_clicks')],
@@ -415,7 +418,7 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
         return dash.no_update
 
 
-# --- Callbacks de Download (Não alterados) ---
+# --- Callbacks de Download (Mantidos) ---
 @app.callback(
     [Output('pdf-task-id-store', 'data'),
      Output('pdf-check-interval', 'disabled'),
@@ -474,29 +477,29 @@ def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json
 def check_pdf_status(n, task_id):
     if not task_id:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-    with gerador_pdf.PDF_CACHE_LOCK:
-        task = gerador_pdf.PDF_CACHE.get(task_id)
+    with PDF_CACHE_LOCK:
+        task = PDF_CACHE.get(task_id)
     if task:
         try:
             if task["status"] == "concluido":
                 print(f"[Check PDF] Tarefa {task_id} concluída. Enviando download.")
                 pdf_output = io.BytesIO(task["data"])
-                with gerador_pdf.PDF_CACHE_LOCK:
-                    del gerador_pdf.PDF_CACHE[task_id]
+                with PDF_CACHE_LOCK:
+                    del PDF_CACHE[task_id]
                 return dcc.send_bytes(pdf_output.read(), task["filename"],
                                       type="application/pdf"), True, False, False, None, False, False
             elif task["status"] == "erro":
                 print(f"[Check PDF] Tarefa {task_id} falhou: {task['message']}")
-                with gerador_pdf.PDF_CACHE_LOCK:
-                    del gerador_pdf.PDF_CACHE[task_id]
+                with PDF_CACHE_LOCK:
+                    del PDF_CACHE[task_id]
                 if "Sem dados" in task["message"]:
                     return dash.no_update, True, True, False, None, False, False
                 else:
                     return dash.no_update, True, False, True, None, False, False
         except Exception as e:
-            with gerador_pdf.PDF_CACHE_LOCK:
-                if task_id in gerador_pdf.PDF_CACHE:
-                    del gerador_pdf.PDF_CACHE[task_id]
+            with PDF_CACHE_LOCK:
+                if task_id in PDF_CACHE:
+                    del PDF_CACHE[task_id]
             print(f"ERRO CRÍTICO ao processar o cache do PDF: {e}")
             traceback.print_exc()
             return dash.no_update, True, False, True, None, False, False
@@ -561,28 +564,28 @@ def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
 def check_excel_status(n, task_id):
     if not task_id:
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
-    with gerador_pdf.EXCEL_CACHE_LOCK:
-        task = gerador_pdf.EXCEL_CACHE.get(task_id)
+    with EXCEL_CACHE_LOCK:
+        task = EXCEL_CACHE.get(task_id)
     if task:
         try:
             if task["status"] == "concluido":
                 print(f"[Check Excel] Tarefa {task_id} concluída. Enviando download.")
-                with gerador_pdf.EXCEL_CACHE_LOCK:
-                    del gerador_pdf.EXCEL_CACHE[task_id]
+                with EXCEL_CACHE_LOCK:
+                    del EXCEL_CACHE[task_id]
                 return dcc.send_bytes(task["data"], task["filename"],
                                       type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), True, False, False, None, False, False
             elif task["status"] == "erro":
                 print(f"[Check Excel] Tarefa {task_id} falhou: {task['message']}")
-                with gerador_pdf.EXCEL_CACHE_LOCK:
-                    del gerador_pdf.EXCEL_CACHE[task_id]
+                with EXCEL_CACHE_LOCK:
+                    del EXCEL_CACHE[task_id]
                 if "Sem dados" in task["message"]:
                     return dash.no_update, True, True, False, None, False, False
                 else:
                     return dash.no_update, True, False, True, None, False, False
         except Exception as e:
-            with gerador_pdf.EXCEL_CACHE_LOCK:
-                if task_id in gerador_pdf.EXCEL_CACHE:
-                    del gerador_pdf.EXCEL_CACHE[task_id]
+            with EXCEL_CACHE_LOCK:
+                if task_id in EXCEL_CACHE:
+                    del EXCEL_CACHE[task_id]
             print(f"ERRO CRÍTICO ao processar o cache do Excel: {e}")
             return dash.no_update, True, False, True, None, False, False
     print(f"[Check Excel] Tarefa {task_id} ainda em andamento...")

@@ -1,4 +1,4 @@
-# pages/map_view.py (CORRIGIDO: Título do card abreviado para "Umid. Solo(72h)")
+# pages/map_view.py (COMPLETO, COM PASSO 4 APLICADO)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -12,9 +12,11 @@ import json
 
 # IMPORTAÇÃO CRÍTICA
 from app import app
-# Importa constantes
-from config import PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO, CHUVA_LIMITE_VERDE, \
-    CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA
+# Importa constantes (JÁ TEM TUDO O QUE PRECISAMOS)
+from config import (
+    PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO,
+    CHUVA_LIMITE_VERDE, CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA
+)
 import processamento
 import data_source
 
@@ -22,6 +24,7 @@ import data_source
 # --- Layout da Página do Mapa ---
 def get_layout():
     """ Retorna o layout da página do mapa. """
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     print("Executando map_view.get_layout() (Dois Cards Superiores)")
     try:
         layout = dbc.Container([
@@ -65,6 +68,7 @@ def get_layout():
     Input('store-dados-sessao', 'data')
 )
 def update_map_pins(dados_json):
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     if not dados_json:
         return []
 
@@ -122,6 +126,7 @@ def update_map_pins(dados_json):
 
 # --- Funções e Constantes ---
 def get_color_class_chuva(value):
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     if pd.isna(value): return "bg-secondary";
     if value <= CHUVA_LIMITE_VERDE:
         return "bg-success";
@@ -133,7 +138,7 @@ def get_color_class_chuva(value):
         return "bg-danger"
 
 
-# --- Função create_km_block ---
+# --- Função create_km_block (MODIFICADA) ---
 def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     """
     Cria o bloco de resumo do KM para os cards laterais.
@@ -144,18 +149,53 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
     status_chuva_col = "secondary"
     cor_chuva_class = "bg-secondary"
 
+    # NOTA: status_ponto_txt é o status GERAL (combinado)
+    # A lógica original assume que o gauge de chuva deve mostrar o status geral.
     status_chuva_txt = status_ponto_txt
     _, status_chuva_col, cor_chuva_class = STATUS_MAP_HIERARQUICO.get(
         RISCO_MAP.get(status_chuva_txt, -1),
         STATUS_MAP_HIERARQUICO[-1]
     )
 
-    # --- (Status da Umidade travado como INDEFINIDO) ---
-    status_umid_txt = "INDEFINIDO"
+    # --- INÍCIO DA ALTERAÇÃO (PASSO 4) ---
+    # Substitui o bloco "travado"
+    status_umid_txt = "SEM DADOS"
     status_umid_col = "secondary"
     cor_umidade_class = "bg-secondary"
     risco_umidade = -1
-    # --- FIM ---
+
+    try:
+        if not df_ponto.empty:
+            # Pega a leitura mais recente
+            ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
+
+            # Pega as constantes para este ponto (do config.py)
+            constantes_ponto = config  # 'config' já é o PONTOS_DE_ANALISE[id_ponto]
+            base_1m = constantes_ponto['constantes'].get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
+            base_2m = constantes_ponto['constantes'].get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
+            base_3m = constantes_ponto['constantes'].get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
+
+            # Chama a função que já existe em processamento.py
+            status_umidade_tuple = processamento.definir_status_umidade_hierarquico(
+                ultimo_dado.get('umidade_1m_perc'),
+                ultimo_dado.get('umidade_2m_perc'),
+                ultimo_dado.get('umidade_3m_perc'),
+                base_1m, base_2m, base_3m
+            )
+
+            # Desempacota os resultados
+            status_umid_txt, status_umid_col, cor_umidade_class = status_umidade_tuple
+            risco_umidade = RISCO_MAP.get(status_umid_txt, -1)
+
+        # Se df_ponto estiver vazio ou se os dados de umidade forem NA (como no KM 67, 74, 81),
+        # a função 'definir_status_umidade_hierarquico' retornará (-1),
+        # e os valores padrão (SEM DADOS/secondary) serão usados.
+
+    except Exception as e_umid_map:
+        # Se falhar (ex: df_ponto vazio), mantém os valores padrão (SEM DADOS)
+        print(f"Aviso: falha ao calcular gauge de umidade do mapa para {id_ponto}: {e_umid_map}")
+        pass
+    # --- FIM DA ALTERAÇÃO (PASSO 4) ---
 
     try:
         if not df_ponto.empty:
@@ -164,18 +204,19 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
                 df_ponto = df_ponto.dropna(subset=['timestamp']).copy()
             if 'chuva_mm' in df_ponto.columns:
                 df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
+
+            # Recalcula o valor da chuva 72h (apenas para exibição no gauge)
             df_chuva_72h = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
             if not df_chuva_72h.empty:
                 chuva_val = df_chuva_72h.iloc[-1]['chuva_mm']
                 if not pd.isna(chuva_val):
                     ultima_chuva_72h = chuva_val
+
     except Exception as e:
-        print(f"ERRO GERAL em create_km_block para {id_ponto}: {e}")
+        print(f"ERRO GERAL em create_km_block (cálculo chuva) para {id_ponto}: {e}")
         traceback.print_exc()
         ultima_chuva_72h = 0.0
-        status_chuva_txt = "ERRO";
-        status_chuva_col = "danger";
-        cor_chuva_class = "bg-danger"
+        # O status_chuva_txt já foi definido pelo status_ponto_txt
 
     # --- Lógica do Gauge de Chuva (Visual) ---
     chuva_max_visual = 90.0
@@ -193,6 +234,7 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         umidade_percent_realista = 75
     elif risco_umidade == 3:
         umidade_percent_realista = 100
+    # Se risco_umidade == -1 (SEM DADOS), o valor fica 0
 
     # --- Montagem dos Gauges ---
     chuva_gauge = html.Div(
@@ -204,6 +246,8 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
             )
         ], className="gauge-vertical-container"
     )
+
+    # (MODIFICADO)
     umidade_gauge = html.Div(
         [
             html.Div(className=f"gauge-bar {cor_umidade_class}", style={'height': f'{umidade_percent_realista}%'})
@@ -211,6 +255,8 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         className="gauge-vertical-container"
     )
     chuva_badge = dbc.Badge(status_chuva_txt, color=status_chuva_col, className="w-100 mt-1 small badge-black-text")
+
+    # (MODIFICADO)
     umidade_badge = dbc.Badge(status_umid_txt, color=status_umid_col, className="w-100 mt-1 small badge-black-text")
 
     # Envolve com Link (mantido)
@@ -219,12 +265,8 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
         html.H6(f"Estação {config['nome']}", className="text-center mb-1"),
         dbc.Row([
             dbc.Col([html.Div("Chuva (72h)", className="small text-center"), chuva_gauge, chuva_badge], width=6),
-
-            # --- INÍCIO DA ALTERAÇÃO (Título da Coluna Abreviado) ---
             dbc.Col([html.Div("Umid. Solo(72h)", className="small text-center"), umidade_gauge, umidade_badge],
                     width=6),
-            # --- FIM DA ALTERAÇÃO ---
-
         ], className="g-0"),
     ], className="km-summary-block")
 
@@ -242,6 +284,7 @@ def create_km_block(id_ponto, config, df_ponto, status_ponto_txt):
      Input('store-ultimo-status', 'data')]
 )
 def update_summary_left(dados_json, status_json):
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     if not dados_json or not status_json:
         return dbc.Spinner(size="sm")
     try:
@@ -252,6 +295,11 @@ def update_summary_left(dados_json, status_json):
         df_completo.loc[:, 'chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
         df_completo.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_completo['precipitacao_acumulada_mm'],
                                                                         errors='coerce')
+        # Adiciona colunas de umidade para garantir que a função create_km_block as encontre
+        for col in ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']:
+            if col not in df_completo.columns:
+                df_completo[col] = pd.NA
+
         df_completo = df_completo.dropna(subset=['timestamp']).copy()
         status_atual = status_json
         left_blocks = []
@@ -277,6 +325,7 @@ def update_summary_left(dados_json, status_json):
      Input('store-ultimo-status', 'data')]
 )
 def update_summary_right(dados_json, status_json):
+    # ... (Esta função permanece EXATAMENTE IGUAL) ...
     if not dados_json or not status_json:
         return dbc.Spinner(size="sm")
     try:
@@ -287,6 +336,11 @@ def update_summary_right(dados_json, status_json):
         df_completo.loc[:, 'chuva_mm'] = pd.to_numeric(df_completo['chuva_mm'], errors='coerce')
         df_completo.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_completo['precipitacao_acumulada_mm'],
                                                                         errors='coerce')
+        # Adiciona colunas de umidade para garantir que a função create_km_block as encontre
+        for col in ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']:
+            if col not in df_completo.columns:
+                df_completo[col] = pd.NA
+
         df_completo = df_completo.dropna(subset=['timestamp']).copy()
         status_atual = status_json
         right_blocks = []
