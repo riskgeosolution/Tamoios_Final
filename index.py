@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v6: Reverte para o modo "somente incremental" v4)
+# index.py (COMPLETO, v7: Mesclagem Centralizada antes de Salvar)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -73,6 +73,7 @@ def worker_verificar_alertas(status_novos, status_antigos):
 def worker_main_loop():
     """
     Função que roda a CADA 15 MINUTOS (Modo Leve)
+    (v7: Mesclagem Centralizada)
     """
     inicio_ciclo = time.time()
     try:
@@ -114,13 +115,14 @@ def worker_main_loop():
                 data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
         # --- FIM DO BACKFILL DE CHUVA ---
 
-        # --- LÓGICA DE COLETA LEVE (CHUVA + UMIDADE) ---
+        # --- INÍCIO DA ALTERAÇÃO v7: LÓGICA DE MESCLAGEM ---
 
         # 1. COLETAR CHUVA (WeatherLink)
-        novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
-        historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega
+        # (A função agora SÓ retorna o DF, não salva mais)
+        novos_dados_chuva_df, status_novos_API, _ = data_source.executar_passo_api_e_salvar(historico_df)
 
         # 2. COLETAR UMIDADE (Zentra - MODO LEVE)
+        df_umidade_incremental = pd.DataFrame(columns=data_source.COLUNAS_HISTORICO)
         try:
             print("[Worker Thread] Executando coleta INCREMENTAL de Umidade Zentra...")
             dados_umidade_dict = data_source.fetch_data_from_zentra_cloud()
@@ -142,23 +144,45 @@ def worker_main_loop():
 
                 df_umidade_incremental = pd.DataFrame([linha_umidade])
                 df_umidade_incremental['timestamp'] = pd.to_datetime(df_umidade_incremental['timestamp'], utc=True)
-
-                # Salva em AMBOS os locais (importante para PDF/Excel)
-                data_source.save_to_sqlite(df_umidade_incremental)
-                historico_combinado = pd.concat([historico_df, df_umidade_incremental], ignore_index=True)
-                data_source.save_historico_to_csv(historico_combinado)
-
-                # Recarrega o histórico final mesclado
-                historico_df, _, _ = data_source.get_all_data_from_disk()
-                print("[Worker Thread] Coleta incremental de Umidade Zentra mesclada.")
+                print("[Worker Thread] Coleta incremental de Umidade Zentra OK.")
             else:
                 print("[Worker Thread] Zentra (Incremental) não retornou novos dados.")
         except Exception as e_incremental_km72:
             data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Incremental Zentra): {e_incremental_km72}")
             traceback.print_exc()
-        # --- FIM DA COLETA LEVE ---
 
-        # 3. CÁLCULO DE STATUS (Com os dados mesclados)
+        # 3. MESCLAR E SALVAR (A parte mais importante)
+
+        # Concatena os *novos* dados (chuva + umidade)
+        df_novos_combinados = pd.concat([novos_dados_chuva_df, df_umidade_incremental], ignore_index=True)
+
+        if not df_novos_combinados.empty:
+            # Garante que todas as colunas existam antes de mesclar
+            for col in data_source.COLUNAS_HISTORICO:
+                if col not in df_novos_combinados.columns:
+                    df_novos_combinados[col] = pd.NA
+
+            # Usa a mesma lógica do CSV para mesclar as linhas (ex: 17:00 chuva + 17:00 umidade)
+            df_novos_mesclados = df_novos_combinados.groupby(['id_ponto', 'timestamp']).max().reset_index()
+
+            # 4. Salvar os dados MESCLADOS em AMBOS os locais
+
+            # Salva no SQLITE (agora só salva UMA VEZ, e a linha correta)
+            data_source.save_to_sqlite(df_novos_mesclados)
+
+            # Salva no CSV (adicionando ao histórico antigo)
+            historico_final_para_csv = pd.concat([historico_df, df_novos_mesclados], ignore_index=True)
+            data_source.save_historico_to_csv(historico_final_para_csv)
+
+            # Recarrega o histórico final mesclado
+            historico_df, _, _ = data_source.get_all_data_from_disk()
+            print("[Worker Thread] Dados mesclados salvos no CSV e SQLite.")
+        else:
+            print("[Worker Thread] Nenhum dado novo (chuva ou umidade) para salvar.")
+
+        # --- FIM DA ALTERAÇÃO v7 ---
+
+        # 5. CÁLCULO DE STATUS (Com os dados mesclados)
         historico_completo = historico_df.copy()
         if historico_completo.empty:
             print("AVISO (Thread): Histórico vazio, pulando cálculo de status.")
@@ -216,10 +240,10 @@ def worker_main_loop():
                 status_atualizado[id_ponto] = status_final_txt
             # --- FIM DO CÁLCULO DE STATUS ---
 
-        # 5. Verificar alertas
+        # 6. Verificar alertas
         status_final_com_alertas = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
 
-        # 6. SALVAR O STATUS ATUALIZADO NO DISCO
+        # 7. SALVAR O STATUS ATUALIZADO NO DISCO
         try:
             with open(data_source.STATUS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(status_final_com_alertas, f, indent=2)
@@ -247,11 +271,6 @@ def background_task_wrapper():
     data_source.setup_disk_paths()
     print("--- Processo Worker (Thread) Iniciado (Modo Sincronizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado com sucesso.")
-
-    # --- INÍCIO DA CORREÇÃO (REMOVIDO BACKFILL INICIAL) ---
-    # A lógica de backfill pesado foi removida daqui
-    # para evitar o travamento (deadlock) no deploy.
-    # --- FIM DA CORREÇÃO ---
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60

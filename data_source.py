@@ -1,4 +1,4 @@
-# data_source.py (COMPLETO, com Patch de TIMEOUT)
+# data_source.py (COMPLETO, v7 - Remove save from exec)
 
 import pandas as pd
 import json
@@ -89,8 +89,15 @@ def save_to_sqlite(df_novos_dados):
         return
     try:
         engine = get_engine()
-        df_novos_dados.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
-        print(f"[SQLite] {len(df_novos_dados)} novos pontos salvos no DB.")
+
+        # --- INÍCIO DA ALTERAÇÃO v7 ---
+        # Garantimos que apenas as colunas do DB sejam enviadas
+        df_para_salvar = df_novos_dados[COLUNAS_HISTORICO].copy()
+
+        df_para_salvar.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
+        # --- FIM DA ALTERAÇÃO v7 ---
+
+        print(f"[SQLite] {len(df_para_salvar)} novos pontos salvos no DB.")
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
             print(f"[SQLite] Aviso: Dados duplicados para este timestamp. Ignorando.")
@@ -234,10 +241,14 @@ def get_all_data_from_disk():
 
 
 # ==========================================================
-# --- FUNÇÕES USADAS PELO WORKER.PY ---
+# --- FUNÇÕES USADAS PELO WORKER.PY (ALTERAÇÃO v7) ---
 # ==========================================================
 
 def executar_passo_api_e_salvar(historico_df_csv):
+    """
+    (v7) Esta função agora SÓ coleta dados da WeatherLink e os retorna.
+    Ela NÃO salva mais no SQLite ou CSV.
+    """
     try:
         # 1. Coleta dados de CHUVA (WeatherLink)
         dados_api_df, status_novos, logs_api = fetch_data_from_weatherlink_api(historico_df_csv)
@@ -250,11 +261,11 @@ def executar_passo_api_e_salvar(historico_df_csv):
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO (fetch_data): {e}")
         traceback.print_exc()
-        return pd.DataFrame(), None
+        return pd.DataFrame(), None, []  # Retorna DF vazio e logs vazios
 
     if dados_api_df.empty:
         print("[Worker] API (WeatherLink) não retornou novos dados neste ciclo.")
-        return pd.DataFrame(), status_novos
+        return pd.DataFrame(), status_novos, logs_api  # Retorna DF vazio
 
     try:
         for col in COLUNAS_HISTORICO:
@@ -269,18 +280,19 @@ def executar_passo_api_e_salvar(historico_df_csv):
         dados_api_df['precipitacao_acumulada_mm'] = pd.to_numeric(dados_api_df['precipitacao_acumulada_mm'],
                                                                   errors='coerce')
 
-        save_to_sqlite(dados_api_df)
+        # --- INÍCIO DA ALTERAÇÃO v7 ---
+        # REMOVIDO: save_to_sqlite(dados_api_df)
+        # REMOVIDO: historico_atualizado_df_csv = pd.concat(...)
+        # REMOVIDO: save_historico_to_csv(historico_atualizado_df_csv)
 
-        historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
-        # Salva no CSV (a função 'save_historico_to_csv' agora agrupa e remove duplicatas)
-        save_historico_to_csv(historico_atualizado_df_csv)
-
-        return dados_api_df, status_novos
+        # Apenas retorna os dados coletados
+        return dados_api_df, status_novos, logs_api
+        # --- FIM DA ALTERAÇÃO v7 ---
 
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO (processar/salvar): {e}")
         traceback.print_exc()
-        return pd.DataFrame(), status_novos
+        return pd.DataFrame(), status_novos, logs_api
 
 
 # ==========================================================
@@ -448,9 +460,10 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
         response = client.get(url, headers=headers, params=params, timeout=15.0)
         # --- FIM DA ALTERAÇÃO ---
         return response
-    except httpx.TimeoutException: # --- ADICIONADO ---
-        print(f"ERRO DE TIMEOUT ZENTRA: A API demorou mais de 15s para responder (IP pode estar bloqueado).") # --- ADICIONADO ---
-        return None # --- ADICIONADO ---
+    except httpx.TimeoutException:  # --- ADICIONADO ---
+        print(
+            f"ERRO DE TIMEOUT ZENTRA: A API demorou mais de 15s para responder (IP pode estar bloqueado).")  # --- ADICIONADO ---
+        return None  # --- ADICIONADO ---
     except httpx.RequestError as e:
         print(f"ERRO DE CONEXÃO ZENTRA: {e}")
         return None
@@ -625,7 +638,7 @@ def backfill_zentra_km72_data(df_historico_existente):
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
             # ----------------------------------------------------
 
-            if response is None: # Erro de conexão ou TIMEOUT
+            if response is None:  # Erro de conexão ou TIMEOUT
                 adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão ou Timeout.")
                 # Não tentamos novamente em caso de timeout, falhamos rápido
                 return
