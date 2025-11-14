@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA CORRIGIDA)
+# index.py (COMPLETO, COM CORREÇÃO DE API DUPLA)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -154,11 +154,17 @@ def worker_main_loop():
         # Primeiro a WeatherLink (chuva)
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
-        # SEGUNDO: Coleta incremental da Zentra (Umidade)
-        dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+        # --- INÍCIO DA CORREÇÃO (Evitar API Call Dupla) ---
+        dados_umidade_km72_inc = None
+        if not run_backfill_km72:
+            # Só faz a coleta incremental se o backfill NÃO rodou neste ciclo
+            print("[Worker Thread] Backfill Zentra não rodou. Executando coleta incremental.")
+            dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+        else:
+            print("[Worker Thread] Backfill Zentra ACABOU DE RODAR. Pulando coleta incremental.")
+        # --- FIM DA CORREÇÃO ---
 
-        # --- INÍCIO DA ALTERAÇÃO (LÓGICA DE BASE DINÂMICA com TRAVA DE 6H) ---
-
+        # --- LÓGICA DE BASE DINÂMICA (Trava 6h) ---
         if dados_umidade_km72_inc:
             # Recarrega o histórico (que agora inclui a linha da WeatherLink)
             historico_df, _, _ = data_source.get_all_data_from_disk()
