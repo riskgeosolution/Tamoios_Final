@@ -162,6 +162,7 @@ def read_historico_from_csv():
     try:
         historico_df = pd.read_csv(HISTORICO_FILE_CSV, sep=',')
         if 'timestamp' in historico_df.columns:
+            # Importante: Garantir que o timestamp seja lido como UTC (consistente com o que é salvo)
             historico_df['timestamp'] = pd.to_datetime(historico_df['timestamp'], utc=True)
         colunas_validas = [col for col in COLUNAS_HISTORICO if col in historico_df.columns]
         historico_df = historico_df[colunas_validas]
@@ -421,6 +422,7 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
     """Helper: Faz a requisição para a API Zentra e retorna a resposta."""
     url = f"{ZENTRA_BASE_URL}/get_readings/"
     params = {
+        # A API Zentra só aceita o formato YYYY-MM-DD
         "device_sn": station_serial,
         "start": start_date.strftime("%Y-%m-%d"),
         "end": end_date.strftime("%Y-%m-%d"),
@@ -514,6 +516,7 @@ def fetch_data_from_zentra_cloud():
             if port_num in MAPA_ZENTRA_KM72:
                 readings = sensor_block.get('readings', [])
                 if readings:
+                    # O incremental (current) geralmente só retorna o último valor no readings[0]
                     latest_value = readings[0].get('value')
 
                     # --- CORREÇÃO (Multiplica por 100) ---
@@ -546,19 +549,46 @@ def fetch_data_from_zentra_cloud():
 
 
 # ==========================================================
-# --- INÍCIO: FUNÇÃO BACKFILL ZENTRA (CORRIGIDA) ---
+# --- INÍCIO: FUNÇÃO BACKFILL ZENTRA (CORRIGIDA COM NOVO START) ---
 # ==========================================================
 def backfill_zentra_km72_data(df_historico_existente):
     id_ponto = ID_PONTO_ZENTRA_KM72
-    print(f"[API Zentra] Iniciando Backfill de 72h para {id_ponto}...")
 
-    # 1. Configurações
+    # --- NOVO: Data de Instalação (08/11/2025) ---
+    INSTALL_DATE_KM72 = datetime.datetime(2025, 11, 8, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    # ---------------------------------------------
+
+    # 1. Configurações da API
     MAX_RETRIES = 3
     WAIT_TIME_SECONDS = 60
 
-    # Busca 3 dias (72h) + 1 dia de margem
+    # 2. Encontrar o último timestamp gravado para este ponto
+    df_ponto = df_historico_existente[df_historico_existente['id_ponto'] == id_ponto]
+    latest_ts = df_ponto['timestamp'].max() if not df_ponto.empty else None
+
+    # 3. Definir o período de busca da API
+
+    # Data final da busca: Agora
     end_date = datetime.datetime.now(datetime.timezone.utc)
-    start_date = end_date - datetime.timedelta(days=3)
+
+    # Padrão: 4 dias atrás (para garantir 72h de backfill)
+    default_start_date = end_date - datetime.timedelta(days=4)
+
+    if latest_ts is None or latest_ts < INSTALL_DATE_KM72:
+        # Primeira execução, ou dados perdidos/muito antigos: Começar da instalação (backfill completo)
+        start_date = INSTALL_DATE_KM72
+        print(f"[API Zentra Backfill] DETECTADO BACKFILL INICIAL/COMPLETO. Iniciando de {INSTALL_DATE_KM72.date()}.")
+    else:
+        # Execução normal: Apenas backfill de 4 dias para garantir o preenchimento incremental.
+        start_date = default_start_date
+        print(f"[API Zentra Backfill] DETECTADO BACKFILL INCREMENTAL. Iniciando de {default_start_date.date()}.")
+
+    # Garante que a data de início seja anterior à data de fim (para evitar erros)
+    if start_date >= end_date:
+        start_date = end_date - datetime.timedelta(days=1)
+
+    print(f"[API Zentra Backfill] Buscando de {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}.")
+    # ------------------------------------------------------------------------------------------------------
 
     attempt = 0
     response = None
@@ -569,7 +599,9 @@ def backfill_zentra_km72_data(df_historico_existente):
             if attempt > 1:
                 print(f"[API Zentra Backfill] Tentativa {attempt}/{MAX_RETRIES}...")
 
+            # --- NOVO: Usando start_date e end_date calculados ---
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
+            # ----------------------------------------------------
 
             if response is None:
                 adicionar_log(id_ponto, f"ERRO API Zentra (Backfill): Falha de conexão.")
@@ -648,6 +680,12 @@ def backfill_zentra_km72_data(df_historico_existente):
                           "AVISO API Zentra (Backfill): Nenhum dado válido encontrado para as portas 1, 2, 3.")
             return
 
+        # --- Log de Contagem Crítica ---
+        count_timestamps = len(dados_por_timestamp)
+        print(f"[API Zentra Backfill] {count_timestamps} timestamps únicos processados do Zentra.")
+        adicionar_log(id_ponto, f"API Zentra Backfill: {count_timestamps} timestamps únicos processados.")
+        # -------------------------------
+
         # 3. Converter para DataFrame
         lista_para_df = []
         for ts, valores in dados_por_timestamp.items():
@@ -671,7 +709,7 @@ def backfill_zentra_km72_data(df_historico_existente):
         # 4. Salvar no SQLite e CSV
         save_to_sqlite(df_backfill_zentra)
 
-        # --- INÍCIO DA CORREÇÃO: Mesclagem Robusta com Merge ---
+        # --- Mesclagem Robusta com Merge (Mantida da V2) ---
 
         # 1. Limpa os DataFrames para garantir apenas colunas históricas
         df_historico_existente = df_historico_existente[
@@ -689,23 +727,19 @@ def backfill_zentra_km72_data(df_historico_existente):
             suffixes=('_old', '_new')
         )
 
-        # 3. Preenche as colunas vazias usando a lógica: novo valor (umidade) > valor antigo (chuva)
+        # 3. Preenche as colunas vazias usando a lógica: novo valor > valor antigo
         for col in COLUNAS_HISTORICO:
             if col not in ['id_ponto', 'timestamp']:
                 col_old = f'{col}_old'
                 col_new = f'{col}_new'
 
-                # Se col_old e col_new existem, use fillna para priorizar 'new' sobre 'old'
                 if col_old in df_mesclado.columns and col_new in df_mesclado.columns:
                     df_mesclado[col] = df_mesclado[col_new].fillna(df_mesclado[col_old])
                     df_mesclado = df_mesclado.drop(columns=[col_old, col_new])
-                # Se só a coluna antiga existir (caso em que a nova não preencheu, o que é raro no merge 'outer')
                 elif col_old in df_mesclado.columns:
                     df_mesclado = df_mesclado.rename(columns={col_old: col})
-                # Se só a nova existir, renomeie
                 elif col_new in df_mesclado.columns:
                     df_mesclado = df_mesclado.rename(columns={col_new: col})
-                # Se nenhuma existir, cria como NA para garantir a coluna
                 elif col not in df_mesclado.columns:
                     df_mesclado[col] = pd.NA
 
@@ -715,10 +749,8 @@ def backfill_zentra_km72_data(df_historico_existente):
 
         save_historico_to_csv(df_agrupado)
 
-        # --- FIM DA CORREÇÃO: Mesclagem Robusta com Merge ---
-
         adicionar_log(id_ponto,
-                      f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade 72h salvos e mesclados.")
+                      f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade salvos e mesclados.")
 
     except Exception as e:
         print(f"ERRO CRÍTICO API Zentra (Backfill Processamento): {e}")
