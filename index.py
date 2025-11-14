@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA E LOGS)
+# index.py (COMPLETO, COM LÓGICA DE BASE DINÂMICA)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -194,11 +194,6 @@ def worker_main_loop():
                     # Aplica a regra: se o novo valor for menor, ele é a nova base
                     if new_sensor_1m < old_base_1m:
                         novos_dados_para_salvar['base_1m'] = new_sensor_1m
-                        # --- ADICIONA LOG ---
-                        log_msg = f"NOVA BASE UMIDADE (1m): Valor alterado de {old_base_1m:.2f}% para {new_sensor_1m:.2f}%."
-                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
-                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
-                        # --- FIM LOG ---
                     else:
                         novos_dados_para_salvar['base_1m'] = old_base_1m
 
@@ -208,11 +203,6 @@ def worker_main_loop():
                     novos_dados_para_salvar['umidade_2m_perc'] = new_sensor_2m
                     if new_sensor_2m < old_base_2m:
                         novos_dados_para_salvar['base_2m'] = new_sensor_2m
-                        # --- ADICIONA LOG ---
-                        log_msg = f"NOVA BASE UMIDADE (2m): Valor alterado de {old_base_2m:.2f}% para {new_sensor_2m:.2f}%."
-                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
-                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
-                        # --- FIM LOG ---
                     else:
                         novos_dados_para_salvar['base_2m'] = old_base_2m
 
@@ -222,11 +212,6 @@ def worker_main_loop():
                     novos_dados_para_salvar['umidade_3m_perc'] = new_sensor_3m
                     if new_sensor_3m < old_base_3m:
                         novos_dados_para_salvar['base_3m'] = new_sensor_3m
-                        # --- ADICIONA LOG ---
-                        log_msg = f"NOVA BASE UMIDADE (3m): Valor alterado de {old_base_3m:.2f}% para {new_sensor_3m:.2f}%."
-                        data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, log_msg)
-                        print(f"| {ID_PONTO_ZENTRA_KM72} | {log_msg}")
-                        # --- FIM LOG ---
                     else:
                         novos_dados_para_salvar['base_3m'] = old_base_3m
 
