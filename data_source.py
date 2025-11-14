@@ -177,7 +177,7 @@ def read_historico_from_csv():
         return pd.DataFrame(columns=COLUNAS_HISTORICO)
     except Exception as e:
         # Se falhar ao ler (ex: arquivo corrompido), apaga o arquivo e começa de novo
-        if "ValueError" in str(e):
+        if "ValueError" in str(e) or "Error tokenizing data" in str(e):
             print(f"ERRO: Arquivo CSV corrompido ({e}). Apagando e recriando...")
             try:
                 os.remove(HISTORICO_FILE_CSV)
