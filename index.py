@@ -146,6 +146,12 @@ def worker_main_loop():
                 data_source.backfill_zentra_km72_data(historico_df)
                 historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
                 print(f"[Worker Thread] Backfill Umidade KM 72 concluído.")
+
+                # --- INÍCIO DA CORREÇÃO (Evitar API Rate Limit) ---
+                print("[Worker Thread] Pausa de 30s pós-backfill para evitar Rate Limit da API Zentra.")
+                time.sleep(30)
+                # --- FIM DA CORREÇÃO ---
+
             except Exception as e_backfill_km72:
                 data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
         # --- FIM DO BACKFILL ---
@@ -154,14 +160,9 @@ def worker_main_loop():
         # Primeiro a WeatherLink (chuva)
         novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
 
-        # --- INÍCIO DA CORREÇÃO (Evitar API Call Dupla) ---
-        dados_umidade_km72_inc = None
-        if not run_backfill_km72:
-            # Só faz a coleta incremental se o backfill NÃO rodou neste ciclo
-            print("[Worker Thread] Backfill Zentra não rodou. Executando coleta incremental.")
-            dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
-        else:
-            print("[Worker Thread] Backfill Zentra ACABOU DE RODAR. Pulando coleta incremental.")
+        # --- INÍCIO DA CORREÇÃO (Removida a trava "if not run_backfill_km72") ---
+        # A coleta incremental de umidade DEVE rodar para preencher a linha de chuva atual
+        dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
         # --- FIM DA CORREÇÃO ---
 
         # --- LÓGICA DE BASE DINÂMICA (Trava 6h) ---

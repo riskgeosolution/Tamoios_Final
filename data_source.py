@@ -180,8 +180,14 @@ def read_historico_from_csv():
 
 def save_historico_to_csv(df):
     try:
-        df_sem_duplicatas = df.sort_values(by='timestamp').drop_duplicates(
-            subset=['id_ponto', 'timestamp'], keep='last')
+        # --- INÍCIO DA CORREÇÃO (AGRUPAR ANTES DE SALVAR) ---
+        # Esta é a lógica central anti-duplicação
+        # Agrupa por ponto/timestamp e pega o valor máximo (NaN < 0.0 < 39.5)
+        # Isso mescla (13:15, 0.0, NaN) e (13:15, NaN, 39.5) em (13:15, 0.0, 39.5)
+        df_agrupado = df.groupby(['id_ponto', 'timestamp']).max().reset_index()
+        # --- FIM DA CORREÇÃO ---
+
+        df_sem_duplicatas = df_agrupado.sort_values(by='timestamp')
 
         max_pontos = MAX_HISTORICO_PONTOS * len(PONTOS_DE_ANALISE)
         df_truncado = df_sem_duplicatas.tail(max_pontos)
@@ -257,7 +263,7 @@ def executar_passo_api_e_salvar(historico_df_csv):
         save_to_sqlite(dados_api_df)
 
         historico_atualizado_df_csv = pd.concat([historico_df_csv, dados_api_df], ignore_index=True)
-        # Salva no CSV usando a lógica de desduplicação (o worker.py irá re-mesclar a umidade)
+        # Salva no CSV (a função 'save_historico_to_csv' agora agrupa e remove duplicatas)
         save_historico_to_csv(historico_atualizado_df_csv)
 
         return dados_api_df, status_novos
@@ -709,45 +715,24 @@ def backfill_zentra_km72_data(df_historico_existente):
         # 4. Salvar no SQLite e CSV
         save_to_sqlite(df_backfill_zentra)
 
-        # --- Mesclagem Robusta com Merge (Mantida da V2) ---
+        # --- INÍCIO DA CORREÇÃO: Mesclagem Robusta com Concat + Groupby.max() ---
 
-        # 1. Limpa os DataFrames para garantir apenas colunas históricas
-        df_historico_existente = df_historico_existente[
-            [col for col in COLUNAS_HISTORICO if col in df_historico_existente.columns]].copy()
+        # 1. Concatena o histórico existente (chuva) com o backfill (umidade)
+        df_combinado = pd.concat([df_historico_existente, df_backfill_zentra], ignore_index=True)
 
-        df_backfill_zentra_clean = df_backfill_zentra[
-            [col for col in COLUNAS_HISTORICO if col in df_backfill_zentra.columns]].copy()
-
-        # 2. Mescla os dados existentes (com chuva) com os novos dados de umidade (zentra)
-        df_mesclado = pd.merge(
-            df_historico_existente,
-            df_backfill_zentra_clean,
-            on=['id_ponto', 'timestamp'],
-            how='outer',
-            suffixes=('_old', '_new')
-        )
-
-        # 3. Preenche as colunas vazias usando a lógica: novo valor > valor antigo
+        # 2. Garante que as colunas corretas existam
         for col in COLUNAS_HISTORICO:
-            if col not in ['id_ponto', 'timestamp']:
-                col_old = f'{col}_old'
-                col_new = f'{col}_new'
+            if col not in df_combinado.columns:
+                df_combinado[col] = pd.NA
 
-                if col_old in df_mesclado.columns and col_new in df_mesclado.columns:
-                    df_mesclado[col] = df_mesclado[col_new].fillna(df_mesclado[col_old])
-                    df_mesclado = df_mesclado.drop(columns=[col_old, col_new])
-                elif col_old in df_mesclado.columns:
-                    df_mesclado = df_mesclado.rename(columns={col_old: col})
-                elif col_new in df_mesclado.columns:
-                    df_mesclado = df_mesclado.rename(columns={col_new: col})
-                elif col not in df_mesclado.columns:
-                    df_mesclado[col] = pd.NA
+        # 3. Agrupa por ponto/timestamp e pega o valor MÁXIMO (ex: 39.5 vence NaN, 0.0 vence NaN)
+        # Esta é a lógica de mesclagem mais segura e à prova de duplicatas.
+        df_agrupado = df_combinado.groupby(['id_ponto', 'timestamp']).max().reset_index()
 
-        # 4. Remove duplicatas restantes e salva apenas as colunas históricas
-        df_agrupado = df_mesclado.drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last')
-        df_agrupado = df_agrupado[COLUNAS_HISTORICO]
-
+        # 4. Salva o CSV final mesclado e sem duplicatas
         save_historico_to_csv(df_agrupado)
+
+        # --- FIM DA CORREÇÃO ---
 
         adicionar_log(id_ponto,
                       f"SUCESSO (Backfill Zentra): {len(df_backfill_zentra)} registros de umidade salvos e mesclados.")
@@ -834,10 +819,11 @@ def backfill_km67_pro_data(df_historico_existente):
 
         save_to_sqlite(df_backfill)
 
-        df_final_csv = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
-        # Agrupa e salva, igual fizemos no backfill da Zentra
-        df_agrupado = df_final_csv.groupby(['id_ponto', 'timestamp']).max().reset_index()
+        # --- INÍCIO DA CORREÇÃO: Mesclagem Robusta com Concat + Groupby.max() ---
+        df_combinado = pd.concat([df_historico_existente, df_backfill], ignore_index=True)
+        df_agrupado = df_combinado.groupby(['id_ponto', 'timestamp']).max().reset_index()
         save_historico_to_csv(df_agrupado)
+        # --- FIM DA CORREÇÃO ---
 
         adicionar_log(id_ponto,
                       f"SUCESSO (Backfill): {len(df_backfill)} registros históricos de 72h (3x 24h) salvos (CSV e SQLite).")
