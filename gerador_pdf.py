@@ -1,4 +1,4 @@
-# gerador_pdf.py (COMPLETO, COM CACHE GLOBAL NO TOPO)
+# gerador_pdf.py (COMPLETO, COM CACHE GLOBAL E FUNÇÕES EXCEL)
 
 import io
 from fpdf import FPDF, Align
@@ -21,18 +21,113 @@ matplotlib.use('Agg')
 # --- FIM DOS NOVOS IMPORTS ---
 
 
-# --- INÍCIO DA CORREÇÃO: VARIÁVEIS DE CACHE E LOCKS NO TOPO (SOLUÇÃO DO IMPORTERROR) ---
+# --- INÍCIO DA CORREÇÃO: VARIÁVEIS DE CACHE E LOCKS NO TOPO ---
 PDF_CACHE = {}
 PDF_CACHE_LOCK = threading.Lock()
 
 EXCEL_CACHE = {}
 EXCEL_CACHE_LOCK = threading.Lock()
-
-
 # --- FIM DA CORREÇÃO ---
 
 
-# --- FUNÇÕES AUXILIARES DE CRIAÇÃO DE PDF (DEVE COMEÇAR AQUI) ---
+# --- FUNÇÃO DE GERAÇÃO DE EXCEL ---
+def criar_relatorio_excel_em_memoria(df_dados, nome_ponto):
+    """
+    Cria um relatório Excel em um buffer de memória.
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Renomeia colunas para o relatório
+        df_relatorio = df_dados.rename(columns={
+            'timestamp_local': 'Data e Hora (Local)',
+            'chuva_mm': 'Chuva (mm/h)',
+            'precipitacao_acumulada_mm': 'Chuva Acumulada no Dia (mm)',
+            'umidade_1m_perc': 'Umidade 1m (%)',
+            'umidade_2m_perc': 'Umidade 2m (%)',
+            'umidade_3m_perc': 'Umidade 3m (%)',
+            'base_1m': 'Base Umidade 1m (%)',
+            'base_2m': 'Base Umidade 2m (%)',
+            'base_3m': 'Base Umidade 3m (%)',
+        })
+
+        # Seleciona e reordena as colunas
+        colunas_para_exportar = [
+            'Data e Hora (Local)', 'Chuva (mm/h)', 'Chuva Acumulada no Dia (mm)',
+            'Umidade 1m (%)', 'Base Umidade 1m (%)',
+            'Umidade 2m (%)', 'Base Umidade 2m (%)',
+            'Umidade 3m (%)', 'Base Umidade 3m (%)'
+        ]
+        
+        # Garante que apenas colunas existentes sejam usadas
+        colunas_existentes = [col for col in colunas_para_exportar if col in df_relatorio.columns]
+        df_relatorio = df_relatorio[colunas_existentes]
+
+        df_relatorio.to_excel(writer, index=False, sheet_name=f'Dados_{nome_ponto}')
+
+        # Auto-ajuste da largura das colunas
+        worksheet = writer.sheets[f'Dados_{nome_ponto}']
+        for i, col in enumerate(df_relatorio.columns):
+            column_len = max(df_relatorio[col].astype(str).map(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, column_len)
+
+    return output.getvalue()
+
+
+# --- FUNÇÃO DA THREAD DE EXCEL ---
+def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
+    """
+    Função que roda na thread para gerar o arquivo Excel.
+    """
+    try:
+        # 1. Preparar datas (igual ao PDF)
+        start_dt_naive = pd.to_datetime(start_date)
+        start_dt_local = start_dt_naive.tz_localize('America/Sao_Paulo')
+        start_dt = start_dt_local.tz_convert('UTC')
+
+        end_dt_naive = pd.to_datetime(end_date)
+        end_dt_local = end_dt_naive.tz_localize('America/Sao_Paulo')
+        end_dt_local_final = end_dt_local + pd.Timedelta(days=1)
+        end_dt = end_dt_local_final.tz_convert('UTC')
+
+        # 2. Ler dados DIRETAMENTE DO SQLITE
+        df_filtrado = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
+
+        if df_filtrado.empty:
+            raise Exception("Sem dados no período selecionado.")
+
+        # 3. Fuso Horário
+        if df_filtrado['timestamp'].dt.tz is None:
+            df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC')
+        df_filtrado['timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
+
+        # 4. Configurações
+        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
+        nome_ponto = config['nome']
+
+        # 5. Chamar a função de gerar Excel
+        excel_buffer = criar_relatorio_excel_em_memoria(df_filtrado, nome_ponto)
+        
+        nome_arquivo = f"Dados_{nome_ponto}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+        # 6. Salva no CACHE
+        with EXCEL_CACHE_LOCK:
+            EXCEL_CACHE[task_id] = {
+                "status": "concluido",
+                "data": excel_buffer,
+                "filename": nome_arquivo
+            }
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO [Thread Excel {task_id}]:")
+        traceback.print_exc()
+        with EXCEL_CACHE_LOCK:
+            EXCEL_CACHE[task_id] = {
+                "status": "erro",
+                "message": str(e)
+            }
+
+
+# --- FUNÇÕES AUXILIARES DE CRIAÇÃO DE PDF ---
 def criar_relatorio_em_memoria(df_dados, fig_chuva_mp, fig_umidade_mp, status_texto, status_cor, periodo_str=""):
     """
     Cria um relatório PDF em buffer de memória.
@@ -329,7 +424,7 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         nome_arquivo = f"Relatorio_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
 
-        # 10. Salva no CACHE (usa PDF_CACHE_LOCK, resolvendo o NameError aqui)
+        # 10. Salva no CACHE
         with PDF_CACHE_LOCK:
             PDF_CACHE[task_id] = {
                 "status": "concluido",
@@ -338,7 +433,6 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
             }
 
     except Exception as e:
-        # ... (lógica de erro mantida igual) ...
         try:
             plt.close(fig_chuva_mp)
             plt.close(fig_umidade_mp)
@@ -347,12 +441,8 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
 
         print(f"ERRO CRÍTICO [Thread PDF {task_id}]:")
         traceback.print_exc()
-        # O bloco else original do erro de thread deve ser resolvido
-        try:
-            with PDF_CACHE_LOCK:
-                PDF_CACHE[task_id] = {
-                    "status": "erro",
-                    "message": str(e)
-                }
-        except NameError:
-            print("AVISO: Falha ao registrar erro no cache devido a NameError.")
+        with PDF_CACHE_LOCK:
+            PDF_CACHE[task_id] = {
+                "status": "erro",
+                "message": str(e)
+            }
