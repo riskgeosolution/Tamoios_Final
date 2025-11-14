@@ -1,4 +1,4 @@
-# index.py (COMPLETO, COM CORREÇÃO DE API DUPLA v2)
+# index.py (COMPLETO, COM CORREÇÃO DEFINITIVA DO LOOP)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -103,14 +103,6 @@ def worker_main_loop():
             except Exception as e_gap:
                 print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 67): {e_gap}. Pulando backfill.")
 
-        if run_backfill_km67:
-            try:
-                data_source.backfill_km67_pro_data(historico_df)
-                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
-                print(f"[Worker Thread] Backfill KM 67 concluído.")
-            except Exception as e_backfill:
-                data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
-
         # B. Backfill Umidade KM 72
         df_km72 = historico_df[historico_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
         run_backfill_km72 = False
@@ -139,29 +131,42 @@ def worker_main_loop():
             except Exception as e_gap_km72:
                 print(f"[Worker Thread] Erro ao checar 'gap' de dados (KM 72): {e_gap_km72}. Pulando backfill.")
 
-        if run_backfill_km72:
-            try:
-                data_source.backfill_zentra_km72_data(historico_df)
-                historico_df, _, _ = data_source.get_all_data_from_disk()  # Recarrega o DF
-                print(f"[Worker Thread] Backfill Umidade KM 72 concluído.")
+        # --- INÍCIO DA CORREÇÃO (Quebra do "Loop da Morte") ---
 
-                # --- INÍCIO DA CORREÇÃO (Evitar API Rate Limit) ---
-                print("[Worker Thread] Pausa de 30s pós-backfill para evitar Rate Limit da API Zentra.")
-                time.sleep(30)
-                # --- FIM DA CORREÇÃO ---
+        dados_umidade_km72_inc = None  # Inicializa como None
 
-            except Exception as e_backfill_km72:
-                data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
-        # --- FIM DO BACKFILL ---
+        # SE HÁ UM GAP, o ciclo é SÓ de backfill.
+        if run_backfill_km67 or run_backfill_km72:
+            print("[Worker Thread] GAPs detectados. Executando ciclo de Backfill.")
+            if run_backfill_km67:
+                try:
+                    data_source.backfill_km67_pro_data(historico_df)
+                    print(f"[Worker Thread] Backfill KM 67 concluído.")
+                except Exception as e_backfill:
+                    data_source.adicionar_log("GERAL", f"ERRO CRÍTICO (Backfill KM 67): {e_backfill}")
 
-        # 2. COLETAR NOVOS DADOS DA API (passo /current)
-        # Primeiro a WeatherLink (chuva)
-        novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
+            if run_backfill_km72:
+                try:
+                    data_source.backfill_zentra_km72_data(historico_df)
+                    print(f"[Worker Thread] Backfill Umidade KM 72 concluído.")
+                except Exception as e_backfill_km72:
+                    data_source.adicionar_log(ID_PONTO_ZENTRA_KM72,
+                                              f"ERRO CRÍTICO (Backfill Zentra): {e_backfill_km72}")
 
-        # --- INÍCIO DA CORREÇÃO (Removida a trava "if not run_backfill_km72") ---
-        # A coleta incremental de umidade DEVE rodar para preencher a linha de chuva atual
-        print("[Worker Thread] Executando coleta incremental Zentra...")
-        dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+            # Recarrega o histórico após os backfills
+            historico_df, _, _ = data_source.get_all_data_from_disk()
+            print("[Worker Thread] Backfills concluídos. Coletas incrementais serão puladas neste ciclo.")
+
+        # SE NÃO HÁ GAPS, o ciclo é SÓ incremental.
+        else:
+            print("[Worker Thread] Sem gaps. Executando ciclo incremental normal.")
+            # 2. COLETAR NOVOS DADOS DA API (passo /current)
+            # Primeiro a WeatherLink (chuva)
+            novos_dados_df, status_novos_API = data_source.executar_passo_api_e_salvar(historico_df)
+
+            # SEGUNDO: Coleta incremental da Zentra (Umidade)
+            dados_umidade_km72_inc = data_source.fetch_data_from_zentra_cloud()
+
         # --- FIM DA CORREÇÃO ---
 
         # --- LÓGICA DE BASE DINÂMICA (Trava 6h) ---
@@ -318,7 +323,7 @@ def worker_main_loop():
                 risco_umidade = RISCO_MAP.get(status_umidade_txt, -1)
 
                 status_final_txt = status_chuva_txt
-                if risco_umidade > risco_umidade:
+                if risco_umidade > risco_chuva:
                     status_final_txt = status_umidade_txt
 
                 status_atualizado[id_ponto] = status_final_txt
@@ -507,6 +512,7 @@ if __name__ == '__main__':
     port = 8050
     print(f"Iniciando o servidor Dash (site) em http://{host}:{port}/")
     try:
-        app.run(debug=True, host=host, port=port)
+        # ATENÇÃO: Adicione use_reloader=False para testar localmente
+        app.run(debug=True, host=host, port=port, use_reloader=False)
     except Exception as e:
         print(f"ERRO CRÍTICO NA EXECUÇÃO DO APP.RUN: {e}")
