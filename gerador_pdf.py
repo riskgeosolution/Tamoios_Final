@@ -307,6 +307,10 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         if df_filtrado['timestamp'].dt.tz is None:
             df_filtrado['timestamp'] = pd.to_datetime(df_filtrado['timestamp']).dt.tz_localize('UTC')
         df_filtrado['timestamp_local'] = df_filtrado['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        df_filtrado.dropna(subset=['timestamp_local'], inplace=True)
+        # --- FIM DA CORREÇÃO ---
 
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         # (Pegando o nome amigável)

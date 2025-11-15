@@ -212,11 +212,26 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
+
+    # --- ALTERAÇÃO: Reamostragem para 15 minutos para plotagem ---
+    if not df_ponto_plot.empty:
+        df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg({
+            'chuva_mm': 'sum',
+            'umidade_1m_perc': 'mean',
+            'umidade_2m_perc': 'mean',
+            'umidade_3m_perc': 'mean'
+        }).reset_index()
+    else:
+        df_plot_15min = pd.DataFrame(columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
+
     n_horas_titulo = selected_hours
     df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
     df_chuva_FILTRO_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
     df_chuva_FILTRO_plot = df_chuva_FILTRO_completo[
         df_chuva_FILTRO_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
+    df_chuva_72h_plot = df_chuva_72h_completo[
+        df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()
+    ].copy()
     try:
         ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
         ultima_chuva_72h = df_chuva_72h_completo.iloc[-1]['chuva_mm'] if not df_chuva_72h_completo.empty else 0.0
@@ -256,59 +271,106 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         ]
     except IndexError:
         return "Dados insuficientes.", "", id_ponto
-    if 'timestamp' in df_chuva_FILTRO_plot.columns:
-        if df_chuva_FILTRO_plot['timestamp'].dt.tz is None:
-            df_chuva_FILTRO_plot.loc[:, 'timestamp'] = df_chuva_FILTRO_plot['timestamp'].dt.tz_localize('UTC')
-        df_chuva_FILTRO_plot.loc[:, 'timestamp_local'] = df_chuva_FILTRO_plot['timestamp'].dt.tz_convert(
-            'America/Sao_Paulo')
-    else:
-        df_chuva_FILTRO_plot.loc[:, 'timestamp_local'] = df_chuva_FILTRO_plot['timestamp']
+    for df in [df_chuva_FILTRO_plot, df_chuva_72h_plot]:
+        if 'timestamp' in df.columns:
+            if df['timestamp'].dt.tz is None:
+                df.loc[:, 'timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+            df.loc[:, 'timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        else:
+            df.loc[:, 'timestamp_local'] = df['timestamp']
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
     fig_chuva.add_trace(
-        go.Bar(x=df_ponto_plot['timestamp_local'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária (mm)',
-               marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+        go.Bar(x=df_plot_15min['timestamp_local'], y=df_plot_15min['chuva_mm'], name='Pluv. 15 min (mm)',
+               marker_color='#2C3E50', opacity=0.8),
+        secondary_y=False)
     fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'],
                                    name=f'Acumulada ({n_horas_titulo}h)', mode='lines',
-                                   line=dict(color='#007BFF', width=2.5)), secondary_y=True)
+                                   line=dict(color='#007BFF', width=2.5)),
+                      secondary_y=True)
+    fig_chuva.add_trace(go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'],
+                                   name='Acumulada (72h)', mode='lines',
+                                   line=dict(color='green', width=2, dash='dot'),
+                                   visible='legendonly'),
+                      secondary_y=True)
     fig_chuva.update_layout(title_text=f"Pluviometria - Estação {config['nome']} ({n_horas_titulo}h)",
                             template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=50, b=80),
                             legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
-                            xaxis_title="Data e Hora", yaxis_title="Pluviometria Horária (mm)",
-                            yaxis2_title=f"Acumulada ({n_horas_titulo}h)", hovermode="x unified", bargap=0.1)
-    fig_chuva.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %Hh", tickangle=-45)
-    fig_chuva.update_yaxes(title_text="Pluviometria Horária (mm)", secondary_y=False);
+                            xaxis_title="Data e Hora", yaxis_title="Pluviometria (mm/15min)",
+                            yaxis2_title=f"Acumulada ({n_horas_titulo}h)", hovermode="x unified", bargap=0.1,
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial"))
+    fig_chuva.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
+    fig_chuva.update_yaxes(title_text="Pluviometria (mm/15min)", secondary_y=False);
     fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)
 
-    df_umidade = df_ponto_plot.melt(id_vars=['timestamp_local'],
-                                    value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
-                                    var_name='Sensor', value_name='Umidade (%)')
-    df_umidade['Sensor'] = df_umidade['Sensor'].replace(
-        {'umidade_1m_perc': '1m', 'umidade_2m_perc': '2m', 'umidade_3m_perc': '3m'})
-    fig_umidade = px.line(df_umidade, x='timestamp_local', y='Umidade (%)', color='Sensor',
-                          title=f"Variação da Umidade do Solo - Estação {config['nome']} ({n_horas_titulo}h)",
-                          color_discrete_map=CORES_UMIDADE)
-    fig_umidade.update_traces(line=dict(width=3));
-    fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=80),
-                              legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-                              xaxis_title="Data e Hora", yaxis_title="Umidade do Solo (%)")
-    fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %Hh", tickangle=-45)
+    # --- INÍCIO DA ALTERAÇÃO: Gráfico de Umidade com barras invisíveis ---
+    fig_umidade = go.Figure()
+
+    # Adiciona as barras invisíveis que servirão de "chão" para o mouse
+    fig_umidade.add_trace(go.Bar(
+        x=df_plot_15min['timestamp_local'],
+        # O valor de Y não importa, pois a barra é invisível
+        y=[(df_plot_15min['umidade_3m_perc'].max())*1.1]*len(df_plot_15min) if not df_plot_15min.empty else [],
+        hoverinfo='none',
+        showlegend=False,
+        marker_opacity=0
+    ))
+
+    # Adiciona as linhas de umidade, que serão as informações visíveis
+    fig_umidade.add_trace(go.Scatter(
+        x=df_plot_15min['timestamp_local'],
+        y=df_plot_15min['umidade_1m_perc'],
+        name='Umidade 1m',
+        mode='lines',
+        line=dict(color=CORES_UMIDADE['1m'], width=3)
+    ))
+    fig_umidade.add_trace(go.Scatter(
+        x=df_plot_15min['timestamp_local'],
+        y=df_plot_15min['umidade_2m_perc'],
+        name='Umidade 2m',
+        mode='lines',
+        line=dict(color=CORES_UMIDADE['2m'], width=3)
+    ))
+    fig_umidade.add_trace(go.Scatter(
+        x=df_plot_15min['timestamp_local'],
+        y=df_plot_15min['umidade_3m_perc'],
+        name='Umidade 3m',
+        mode='lines',
+        line=dict(color=CORES_UMIDADE['3m'], width=3)
+    ))
+
+    fig_umidade.update_layout(
+        title_text=f"Variação da Umidade do Solo - Estação {config['nome']} ({n_horas_titulo}h)",
+        template=TEMPLATE_GRAFICO_MODERNO,
+        margin=dict(l=40, r=20, t=40, b=80),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
+        xaxis_title="Data e Hora",
+        yaxis_title="Umidade do Solo (%)",
+        hovermode="x unified",
+        bargap=0,  # Garante que as barras invisíveis se toquem
+        hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial")
+    )
+    fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
+    # --- FIM DA ALTERAÇÃO ---
 
     # --- INÍCIO DA ALTERAÇÃO (Eixo Y 0-50%) ---
     try:
-        if df_umidade['Umidade (%)'].dropna().empty:
+        all_umidade_data = pd.concat([
+            df_plot_15min['umidade_1m_perc'],
+            df_plot_15min['umidade_2m_perc'],
+            df_plot_15min['umidade_3m_perc']
+        ]).dropna()
+
+        if all_umidade_data.empty:
             final_min, final_max = 0, 50
         else:
-            data_min = df_umidade['Umidade (%)'].min()
-            data_max = df_umidade['Umidade (%)'].max()
-            # Garante que o eixo comece em 0 (ou abaixo, se houver dados < 0)
+            data_min = all_umidade_data.min()
+            data_max = all_umidade_data.max()
             final_min = min(0, data_min - 5)
-            # Garante que o eixo vá até 50 (ou acima, se dados > 45)
             final_max = max(50, data_max + 5)
 
         fig_umidade.update_yaxes(range=[final_min, final_max])
     except Exception as e:
         print(f"Erro ao definir range Y da umidade: {e}")
-        # Se falhar, deixa o Plotly decidir (autoscale)
         pass
     # --- FIM DA ALTERAÇÃO ---
 
