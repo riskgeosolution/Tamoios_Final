@@ -45,8 +45,8 @@ def worker_verificar_alertas(status_novos, status_antigos):
                 msg = f"MUDANÇA DE STATUS: {nome_ponto} mudou de {status_antigo} para {status_novo}."
                 data_source.adicionar_log(id_ponto, msg)
                 print(f"| {id_ponto} | {msg}")
-                if novo_status == "PARALIZAÇÃO" or status_anterior == "PARALIZAÇÃO":
-                     alertas.enviar_alerta(id_ponto, nome_ponto, novo_status, status_antigo)
+                if status_novo == "PARALIZAÇÃO" or status_antigo == "PARALIZAÇÃO":
+                     alertas.enviar_alerta(id_ponto, nome_ponto, status_novo, status_antigo)
             except Exception as e:
                 print(f"Erro ao processar mudança de status: {e}")
             status_atualizado[id_ponto] = status_novo
@@ -61,6 +61,9 @@ def worker_main_loop():
 
         novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
         
+        if not novos_dados_chuva_df.empty and 'timestamp' in novos_dados_chuva_df.columns:
+            novos_dados_chuva_df['timestamp'] = pd.to_datetime(novos_dados_chuva_df['timestamp'], utc=True)
+
         df_umidade_incremental = pd.DataFrame()
         try:
             dados_umidade_dict = data_source.fetch_data_from_zentra_cloud()
@@ -105,8 +108,15 @@ def worker_main_loop():
                 chuva_72h_final = acumulado_72h['chuva_mm'].iloc[-1] if not acumulado_72h.empty else 0.0
                 status_chuva, _ = processamento.definir_status_chuva(chuva_72h_final)
                 
-                df_umidade = df_ponto.dropna(subset=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
+                # --- CORREÇÃO INÍCIO ---
+                colunas_umidade = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+                for col in colunas_umidade:
+                    if col in df_ponto.columns:
+                        df_ponto[col] = pd.to_numeric(df_ponto[col], errors='coerce')
+                
+                df_umidade = df_ponto.dropna(subset=colunas_umidade)
                 bases = {f'base_{d}m': df_umidade[f'umidade_{d}m_perc'].min() if not df_umidade.empty else CONSTANTES_PADRAO[f'UMIDADE_BASE_{d}M'] for d in [1, 2, 3]}
+                # --- CORREÇÃO FIM ---
                 
                 ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
                 status_umidade_tuple = processamento.definir_status_umidade_hierarquico(

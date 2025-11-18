@@ -162,25 +162,46 @@ def arredondar_timestamp_15min(ts_epoch):
 
 def fetch_data_from_weatherlink_api():
     ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
-    logs, dados = [], []
+    dados = []
     t = str(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
+    
     with httpx.Client(timeout=30.0) as client:
         for id_ponto, config in WEATHERLINK_CONFIG.items():
-            if "SUA_CHAVE" in config.get('API_KEY', ''): continue
-            params = {"api-key": config['API_KEY'], "station-id": str(config['STATION_ID']), "t": t}
-            params["api-signature"] = calculate_hmac_signature(params, config['API_SECRET'])
+            api_key, api_secret, station_id = config.get('API_KEY'), config.get('API_SECRET'), str(config.get('STATION_ID'))
+            if not all([api_key, api_secret, station_id]) or "SUA_CHAVE" in api_key:
+                continue
+
+            # Conforme o exemplo funcional, o station-id faz parte da assinatura.
+            params_para_assinar = {"api-key": api_key, "station-id": station_id, "t": t}
+            api_signature = calculate_hmac_signature(params_para_assinar, api_secret)
+
+            # Mas NÃO faz parte dos parâmetros da query.
+            query_params = {"api-key": api_key, "t": t, "api-signature": api_signature}
+            
             try:
-                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params)
+                r = client.get(ENDPOINT.format(station_id=station_id), params=query_params)
                 r.raise_for_status()
-                s = next((s['data'][0] for s in r.json().get('sensors', []) if s.get('sensor_type') == 48 and s.get('data')), None)
-                if not s or 'ts' not in s or (int(t) - s['ts']) > 1200:
-                    logs.append({'id_ponto': id_ponto, 'mensagem': 'AVISO API: Estação offline ou dados atrasados.'})
+                
+                # Usando a lógica do exemplo (data_structure_type=10)
+                s = next((s['data'][0] for s in r.json().get('sensors', []) if s.get('data_structure_type') == 10 and s.get('data')), None)
+                
+                if not s or not (ts_sensor := s.get('ts')):
+                    adicionar_log(id_ponto, 'AVISO API: Estação offline ou sem dados de sensor (type 10).')
                     continue
-                dados.append({"timestamp": arredondar_timestamp_15min(s['ts']), "id_ponto": id_ponto, "chuva_mm": s.get('rainfall_last_15_min_mm', 0.0), "precipitacao_acumulada_mm": s.get('rainfall_daily_mm')})
-                logs.append({'id_ponto': id_ponto, 'mensagem': f"API: Sucesso. Chuva 15min: {s.get('rainfall_last_15_min_mm', 0.0):.2f}mm"})
+
+                if (int(t) - ts_sensor) > 1800:  # Limite de 30 minutos
+                    adicionar_log(id_ponto, f"AVISO API: Dados de chuva desatualizados.")
+                    continue
+                
+                dados.append({
+                    "timestamp": arredondar_timestamp_15min(ts_sensor), 
+                    "id_ponto": id_ponto, 
+                    "chuva_mm": s.get('rainfall_last_15_min_mm', 0.0)
+                })
             except Exception as e:
-                logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API: {e}"})
-    return pd.DataFrame(dados), None, logs
+                adicionar_log(id_ponto, f"ERRO API WeatherLink: {e}")
+
+    return pd.DataFrame(dados), None, None
 
 def _get_readings_zentra(client, station_serial, start_date, end_date):
     url = f"{ZENTRA_BASE_URL}/get_readings/"

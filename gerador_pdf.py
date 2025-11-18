@@ -135,6 +135,17 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
     end_dt = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).tz_localize('America/Sao_Paulo').tz_convert('UTC')
     df_brutos = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
     if df_brutos.empty: return pd.DataFrame()
+
+    # --- CORREÇÃO INÍCIO ---
+    if 'chuva_mm' in df_brutos.columns:
+        df_brutos['chuva_mm'] = pd.to_numeric(df_brutos['chuva_mm'], errors='coerce')
+
+    colunas_umidade = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    for col in colunas_umidade:
+        if col in df_brutos.columns:
+            df_brutos[col] = pd.to_numeric(df_brutos[col], errors='coerce')
+    # --- CORREÇÃO FIM ---
+
     df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
     df_consolidado = df_brutos.set_index('timestamp_local').resample('15T').agg({
         'chuva_mm': 'sum', 'umidade_1m_perc': 'mean', 
