@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v12.5: CORREÇÃO FINAL DE INICIALIZAÇÃO)
+# index.py (v12.8: Otimização para Deploy)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -28,7 +28,7 @@ SENHA_CLIENTE = '@Tamoiosv1'
 SENHA_ADMIN = 'admin456'
 
 # ==============================================================================
-# --- LÓGICA DO WORKER (ESTÁVEL) ---
+# --- LÓGICA DO WORKER (OTIMIZADA) ---
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -45,8 +45,8 @@ def worker_verificar_alertas(status_novos, status_antigos):
                 msg = f"MUDANÇA DE STATUS: {nome_ponto} mudou de {status_antigo} para {status_novo}."
                 data_source.adicionar_log(id_ponto, msg)
                 print(f"| {id_ponto} | {msg}")
-                if novo_status == "PARALIZAÇÃO" or status_anterior == "PARALIZAÇÃO":
-                     alertas.enviar_alerta(id_ponto, nome_ponto, novo_status, status_antigo)
+                if status_novo == "PARALIZAÇÃO" or status_antigo == "PARALIZAÇÃO":
+                     alertas.enviar_alerta(id_ponto, nome_ponto, status_novo, status_antigo)
             except Exception as e:
                 print(f"Erro ao processar mudança de status: {e}")
             status_atualizado[id_ponto] = status_novo
@@ -57,10 +57,25 @@ def worker_main_loop():
     try:
         print(f"WORKER (Thread): Início do ciclo.")
         historico_recente_df = data_source.get_recent_data_for_worker(hours=73)
+        
+        # --- INÍCIO DA OTIMIZAÇÃO 1: Adiar Backfill ---
+        if historico_recente_df.empty:
+            print("[Worker] Base de dados vazia. Acionando backfill inicial dentro do loop.")
+            data_source.adicionar_log("GERAL", "Base de dados vazia. Acionando backfill inicial.")
+            for id_ponto in config.WEATHERLINK_CONFIG.keys():
+                data_source.backfill_weatherlink_data(id_ponto)
+            data_source.backfill_zentra_km72_data()
+            print("[Worker] Backfill inicial concluído.")
+            return False # Reinicia o ciclo para carregar os dados recém-baixados
+        # --- FIM DA OTIMIZAÇÃO 1 ---
+
         status_antigos_do_disco = data_source.get_status_from_disk()
 
         novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
         
+        if not novos_dados_chuva_df.empty and 'timestamp' in novos_dados_chuva_df.columns:
+            novos_dados_chuva_df['timestamp'] = pd.to_datetime(novos_dados_chuva_df['timestamp'], utc=True)
+
         df_umidade_incremental = pd.DataFrame()
         try:
             dados_umidade_dict = data_source.fetch_data_from_zentra_cloud()
@@ -96,6 +111,10 @@ def worker_main_loop():
 
         status_atualizado = {}
         if not historico_para_calculo.empty:
+            for col in ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']:
+                if col in historico_para_calculo.columns:
+                    historico_para_calculo[col] = pd.to_numeric(historico_para_calculo[col], errors='coerce')
+
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_para_calculo[historico_para_calculo['id_ponto'] == id_ponto].copy()
                 if df_ponto.empty:
@@ -123,6 +142,11 @@ def worker_main_loop():
             json.dump(status_final, f, indent=2)
 
         print(f"WORKER (Thread): Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
+        
+        # --- INÍCIO DA OTIMIZAÇÃO 2: Ceder CPU ---
+        time.sleep(1)
+        # --- FIM DA OTIMIZAÇÃO 2 ---
+
         return True
     except Exception as e:
         print(f"WORKER ERRO CRÍTICO (Thread): {e}"); traceback.print_exc()
@@ -130,25 +154,20 @@ def worker_main_loop():
         return False
 
 def background_task_wrapper():
-    # CORREÇÃO: A inicialização dos caminhos DEVE ser a primeira coisa que a thread faz.
     data_source.setup_disk_paths()
     data_source.initialize_database()
     
-    print("--- Processo Worker (Thread) Iniciado (v12.5 - Estável) ---")
+    print("--- Processo Worker (Thread) Iniciado (v12.8 Otimizado) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado.")
-    if data_source.read_data_from_sqlite().empty:
-        print("[Worker Inicial] DB vazio. Executando backfill inicial.")
-        for id_ponto in config.WEATHERLINK_CONFIG.keys():
-            data_source.backfill_weatherlink_data(id_ponto)
-        data_source.backfill_zentra_km72_data()
-    else:
-        print("[Worker Inicial] DB já contém dados. Pulando backfill inicial.")
+    
+    # --- OTIMIZAÇÃO 1: Backfill removido da inicialização ---
+    print("[Worker Inicial] Verificação de dados adiada para o primeiro ciclo.")
     
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
     while True:
         if not worker_main_loop():
-            print("WORKER (Thread): Reiniciando ciclo após backfill.")
+            print("WORKER (Thread): Reiniciando ciclo após falha ou backfill.")
             time.sleep(5)
             continue
         
@@ -234,7 +253,6 @@ def update_data_and_logs_from_disk(n_intervals):
 # --- EXECUÇÃO ---
 # ==============================================================================
 
-# CORREÇÃO: A inicialização dos caminhos também é necessária para o processo principal do Dash.
 data_source.setup_disk_paths()
 
 if not os.environ.get("WERKZEUG_MAIN"):
