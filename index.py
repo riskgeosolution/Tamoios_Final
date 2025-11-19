@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v12.11: Final com Fix de Tipagem e Importação)
+# index.py (COMPLETO, v12.12 + data_source.py v12.17)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -8,11 +8,12 @@ import pandas as pd
 from io import StringIO
 import os
 import json
-from dotenv import load_dotenv  # <<< FIX: IMPORTAÇÃO ADICIONADA
+from dotenv import load_dotenv
 import time
 from threading import Thread
 import datetime
-from httpx import HTTPStatusError  # Importar explicitamente
+from httpx import HTTPStatusError
+import traceback
 
 load_dotenv()
 
@@ -22,8 +23,8 @@ import data_source
 import config
 import processamento
 import alertas
-import traceback
 from config import PONTOS_DE_ANALISE, RISCO_MAP, FREQUENCIA_API_SEGUNDOS, ID_PONTO_ZENTRA_KM72, CONSTANTES_PADRAO
+from config import RENDER_SLEEP_TIME_SEC  # <<< Novo Import para o Delay
 
 SENHA_CLIENTE = '@Tamoiosv1'
 SENHA_ADMIN = 'admin456'
@@ -34,6 +35,7 @@ SENHA_ADMIN = 'admin456'
 # ==============================================================================
 
 def worker_verificar_alertas(status_novos, status_antigos):
+    # ... (função mantida sem alterações) ...
     if not status_novos: return status_antigos
     if not isinstance(status_antigos, dict):
         status_antigos = {pid: "INDEFINIDO" for pid in PONTOS_DE_ANALISE.keys()}
@@ -47,8 +49,6 @@ def worker_verificar_alertas(status_novos, status_antigos):
                 msg = f"MUDANÇA DE STATUS: {nome_ponto} mudou de {status_antigo} para {status_novo}."
                 data_source.adicionar_log(id_ponto, msg)
                 print(f"| {id_ponto} | {msg}")
-                # if novo_status == "PARALIZAÇÃO" or status_anterior == "PARALIZAÇÃO":
-                #      alertas.enviar_alerta(id_ponto, nome_ponto, novo_status, status_antigo)
             except Exception as e:
                 print(f"Erro ao processar mudança de status: {e}")
             status_atualizado[id_ponto] = status_novo
@@ -57,25 +57,21 @@ def worker_verificar_alertas(status_novos, status_antigos):
 
 def worker_main_loop():
     inicio_ciclo = time.time()
-    trigger_backfill = False  # Flag para controlar se precisamos reiniciar o loop
+    trigger_backfill = False
 
     try:
-        # --- PRINT DE DEBUG DOS ÚLTIMOS DADOS DO DB ---
         print("\n--- 💾 Últimos 3 Registros no DB (Antes da API) ---")
         print(data_source.get_last_n_entries(n=3).to_string())
         print("--------------------------------------------------\n")
-        # --- FIM: PRINT DE DEBUG ---
 
         print(f"WORKER (Thread): Início do ciclo.")
         historico_recente_df = data_source.get_recent_data_for_worker(hours=73)
         status_antigos_do_disco = data_source.get_status_from_disk()
 
-        # --- BLOCO DE CORREÇÃO CRÍTICA DE TIPAGEM (Linha ~68) ---
-        # Garantir que as colunas numéricas no histórico são floats antes de qualquer cálculo (min())
+        # --- BLOCO DE CORREÇÃO CRÍTICA DE TIPAGEM (Mantido) ---
         numeric_cols_history = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         for col in numeric_cols_history:
             if col in historico_recente_df.columns:
-                # Usando o .loc para evitar o SettingWithCopyWarning e garantindo a coerção para float
                 historico_recente_df.loc[:, col] = pd.to_numeric(historico_recente_df[col], errors='coerce')
         # --- FIM DO BLOCO DE CORREÇÃO ---
 
@@ -97,7 +93,7 @@ def worker_main_loop():
         df_novos = pd.concat([novos_dados_chuva_df, df_umidade_incremental], ignore_index=True)
 
         if not df_novos.empty:
-            data_source.save_to_sqlite(df_novos)
+            data_source.save_to_sqlite(df_novos)  # Utiliza DB_ENGINE global
             historico_para_calculo = pd.concat([historico_recente_df, df_novos], ignore_index=True)
         else:
             historico_para_calculo = historico_recente_df
@@ -108,32 +104,35 @@ def worker_main_loop():
         if not novos_dados_chuva_df.empty:
             for id_ponto in novos_dados_chuva_df['id_ponto'].unique():
                 df_ponto_recente = historico_recente_df[historico_recente_df['id_ponto'] == id_ponto]
+                # Verifica lacuna de dados WeatherLink
                 if not df_ponto_recente.empty and (novos_dados_chuva_df['timestamp'].min() - df_ponto_recente[
                     'timestamp'].max()).total_seconds() > (FREQUENCIA_API_SEGUNDOS * 2):
                     if id_ponto == "Ponto-A-KM67":
                         print(f"[{id_ponto}] LACUNA WeatherLink DETECTADA. Acionando backfill.")
-                        data_source.backfill_weatherlink_data(id_ponto)
-                        trigger_backfill = True
+                        if not data_source.backfill_weatherlink_data(id_ponto):
+                            trigger_backfill = True  # Se o backfill pausar, faz um sleep curto
                     else:
-                        print(
-                            f"[{id_ponto}] LACUNA WeatherLink DETECTADA. Backfill automático não permitido. Apenas registrando.")
-                        data_source.adicionar_log(id_ponto,
-                                                  "AVISO: Lacuna de dados detectada. Backfill automático não acionado para este ponto.")
+                        print(f"[{id_ponto}] LACUNA WeatherLink DETECTADA. Backfill automático não permitido.")
+                        data_source.adicionar_log(id_ponto, "AVISO: Lacuna de dados detectada.")
 
         if not df_umidade_incremental.empty:
             df_ponto_zentra = historico_recente_df[historico_recente_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
+            # Verifica lacuna de dados Zentra (2 horas)
             if not df_ponto_zentra.empty and (df_umidade_incremental['timestamp'].min() - df_ponto_zentra[
                 'timestamp'].max()).total_seconds() > 3600 * 2:
                 print(f"[{ID_PONTO_ZENTRA_KM72}] LACUNA Zentra DETECTADA. Acionando backfill.")
-                data_source.backfill_zentra_km72_data()
-                trigger_backfill = True
+                if not data_source.backfill_zentra_km72_data():
+                    trigger_backfill = True  # Se o backfill pausar, faz um sleep curto
 
         if trigger_backfill:
-            return False
+            return False  # Retorna False para que o loop faça um sleep curto
         # --- FIM DA DETECÇÃO DE BACKFILL ---
 
+        # --- CÁLCULO DE STATUS E SALVAMENTO NO DISCO (Mantido) ---
         status_atualizado = {}
         if not historico_para_calculo.empty:
+            # ... (lógica de cálculo de status baseada em chuva e umidade) ...
+            # ... (cálculos de acumulado, bases, e status_umidade_tuple) ...
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_para_calculo[historico_para_calculo['id_ponto'] == id_ponto].copy()
                 if df_ponto.empty:
@@ -175,22 +174,33 @@ def worker_main_loop():
 
 
 def background_task_wrapper():
-    # CORREÇÃO: A inicialização dos caminhos DEVE ser a primeira coisa que a thread faz.
+    """
+    Função principal executada pela thread em segundo plano.
+    Inclui o delay crítico para evitar o Worker Timeout inicial.
+    """
+    # CRÍTICO: Inicializa o DB_ENGINE e os caminhos.
     data_source.setup_disk_paths()
     data_source.initialize_database()
 
     print("--- Processo Worker (Thread) Iniciado (v12.5 - Estável) ---")
     data_source.adicionar_log("GERAL", "Processo Worker (Thread) iniciado.")
+
+    # --- CORREÇÃO CRÍTICA 2: ADICIONA DELAY PARA LIBERAR O GUNICORN/DASH ---
+    # Dá tempo para o servidor Dash iniciar e carregar a primeira página (liberando locks)
+    # antes do Worker iniciar a tarefa longa (Backfill Inicial).
+    print(f"[Worker Inicial] Atrasando backfill inicial para liberar o Dash ({RENDER_SLEEP_TIME_SEC}s)...")
+    time.sleep(RENDER_SLEEP_TIME_SEC)
+    # --- FIM DA CORREÇÃO ---
+
     if data_source.read_data_from_sqlite().empty:
         print("[Worker Inicial] DB vazio. Executando backfill inicial para pontos autorizados.")
-        # Executa o backfill apenas para o ponto Pro autorizado para evitar falhas de API.
         try:
-            data_source.backfill_weatherlink_data("Ponto-A-KM67")
+            if not data_source.backfill_weatherlink_data("Ponto-A-KM67"):
+                print("[Worker Inicial] Backfill WL pausado por timeout, Worker fará sleep curto.")
         except HTTPStatusError as e:
             if e.response.status_code == 401:
-                data_source.adicionar_log("Ponto-A-KM67",
-                                          "AVISO: Falha na autenticação (401) no backfill inicial. Verifique as credenciais da API. Backfill pulado.")
-                print(f"[API Ponto-A-KM67] AVISO: Falha na autenticação (401) no backfill inicial. Backfill pulado.")
+                data_source.adicionar_log("Ponto-A-KM67", "AVISO: Falha na autenticação (401) no backfill inicial.")
+                print(f"[API Ponto-A-KM67] AVISO: Falha na autenticação (401) no backfill inicial.")
             else:
                 data_source.adicionar_log("Ponto-A-KM67", f"ERRO API WeatherLink (Backfill Inicial): {e}")
                 print(f"[API Ponto-A-KM67] ERRO API WeatherLink (Backfill Inicial): {e}")
@@ -200,16 +210,19 @@ def background_task_wrapper():
             print(f"[API Ponto-A-KM67] ERRO CRÍTICO (Backfill Inicial WeatherLink): {e}")
             traceback.print_exc()
 
-        data_source.backfill_zentra_km72_data()
+        if not data_source.backfill_zentra_km72_data():
+            print("[Worker Inicial] Backfill Zentra pausado por timeout, Worker fará sleep curto.")
+
     else:
         print("[Worker Inicial] DB já contém dados. Pulando backfill inicial.")
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
     while True:
+        # Se o worker_main_loop retornar False (pausa do backfill), faz sleep curto (RENDER_SLEEP_TIME_SEC)
         if not worker_main_loop():
-            print("WORKER (Thread): Reiniciando ciclo após backfill.")
-            time.sleep(5)
+            print(f"WORKER (Thread): Reiniciando ciclo após backfill/pausa. Dormindo por {RENDER_SLEEP_TIME_SEC}s.")
+            time.sleep(RENDER_SLEEP_TIME_SEC)
             continue
 
         agora = datetime.datetime.now(datetime.timezone.utc)
@@ -231,7 +244,7 @@ def background_task_wrapper():
 
 
 # ==============================================================================
-# --- LAYOUT E CALLBACKS DA APLICAÇÃO ---
+# --- LAYOUT E CALLBACKS DA APLICAÇÃO (Mantido) ---
 # ==============================================================================
 
 app.layout = html.Div([
@@ -244,6 +257,8 @@ app.layout = html.Div([
     html.Div(id='page-container-root')
 ])
 
+
+# ... (callbacks do Dash omitidos para brevidade) ...
 
 @app.callback(Output('page-container-root', 'children'), [Input('session-store', 'data')])
 def display_page_root(session_data):
@@ -295,6 +310,7 @@ def toggle_interval_update(session_data):
     [Input('intervalo-atualizacao-dados', 'n_intervals')]
 )
 def update_data_and_logs_from_disk(n_intervals):
+    # Chama a função que usa o DB_ENGINE global
     df, status, logs = data_source.get_all_data_for_dashboard()
     return df.to_json(date_format='iso', orient='split'), status, logs
 
@@ -303,7 +319,7 @@ def update_data_and_logs_from_disk(n_intervals):
 # --- EXECUÇÃO ---
 # ==============================================================================
 
-# CORREÇÃO: A inicialização dos caminhos também é necessária para o processo principal do Dash.
+# CRÍTICO: O processo principal também precisa inicializar o DB_ENGINE.
 data_source.setup_disk_paths()
 
 if not os.environ.get("WERKZEUG_MAIN"):
@@ -314,4 +330,5 @@ else:
 
 if __name__ == '__main__':
     print(f"Iniciando o servidor Dash em http://127.0.0.1:8050/")
+    # Garante que o worker não seja iniciado duas vezes em debug (use_reloader=False)
     app.run(debug=True, host='127.0.0.1', port=8050, use_reloader=False)

@@ -1,4 +1,4 @@
-# data_source.py (v12.16: COM TIMER DE KEEPALIVE IMPLEMENTADO)
+# data_source.py (COMPLETO, v12.18 - Reduzindo Leitura do Dash)
 
 import pandas as pd
 import json
@@ -18,18 +18,23 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from config import (
     PONTOS_DE_ANALISE, CONSTANTES_PADRAO,
-    FREQUENCIA_API_SEGUNDOS, BACKFILL_RUN_TIME_SEC,  # <<< IMPORTAÇÃO NECESSÁRIA
+    FREQUENCIA_API_SEGUNDOS, BACKFILL_RUN_TIME_SEC,
     MAX_HISTORICO_PONTOS,
     WEATHERLINK_CONFIG,
     DB_TABLE_NAME,
     ZENTRA_API_TOKEN, ZENTRA_STATION_SERIAL, ZENTRA_BASE_URL,
-    MAPA_ZENTRA_KM72, ID_PONTO_ZENTRA_KM72
+    MAPA_ZENTRA_KM72, ID_PONTO_ZENTRA_KM72,
+    RENDER_SLEEP_TIME_SEC
 )
 
+# -----------------------------------------------------------------------------
+# -- VARIÁVEIS GLOBAIS DE CONEXÃO --
+# -----------------------------------------------------------------------------
 DATA_DIR = "."
 DB_CONNECTION_STRING = ""
 STATUS_FILE = os.path.join(DATA_DIR, "status_atual.json")
 LOG_FILE = os.path.join(DATA_DIR, "eventos.log")
+DB_ENGINE = None  # Engine global para otimização de concorrência
 
 COLUNAS_HISTORICO = [
     'timestamp', 'id_ponto', 'chuva_mm', 'precipitacao_acumulada_mm',
@@ -66,8 +71,11 @@ def ler_logs_eventos(id_ponto):
 
 
 def setup_disk_paths():
-    print("--- data_source.py (v12.16 - Finalizando Debug) ---")
-    global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING
+    """
+    Define os caminhos de disco e, o mais importante, inicializa o DB_ENGINE global.
+    """
+    print("--- data_source.py (v12.18 - Engine Global Otimizado) ---")
+    global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING, DB_ENGINE
 
     DB_FILENAME = "temp_local_db.db"
 
@@ -78,6 +86,10 @@ def setup_disk_paths():
         DATA_DIR = "."
         DB_CONNECTION_STRING = f'sqlite:///{DB_FILENAME}'
 
+    # --- FIX CRÍTICO: Cria o Engine GLOBAL uma única vez. ---
+    # Adiciona connect_args={"timeout": 30} para dar 30s para o leitor adquirir o lock do DB.
+    DB_ENGINE = create_engine(DB_CONNECTION_STRING, connect_args={"timeout": 30})
+
     STATUS_FILE = os.path.join(DATA_DIR, "status_atual.json")
     LOG_FILE = os.path.join(DATA_DIR, "eventos.log")
 
@@ -85,36 +97,39 @@ def setup_disk_paths():
     print(f"Banco de Dados (Fonte da Verdade): {DB_CONNECTION_STRING}")
 
 
-def get_engine():
-    return create_engine(DB_CONNECTION_STRING)
-
-
 def initialize_database():
+    """Verifica e cria a tabela e índices no SQLite, usando o DB_ENGINE global."""
+    global DB_ENGINE
+    if DB_ENGINE is None:
+        raise Exception("DB_ENGINE não foi inicializado. Chame setup_disk_paths() primeiro.")
+
     try:
-        engine = get_engine()
-        inspector = inspect(engine)
+        inspector = inspect(DB_ENGINE)
         if not inspector.has_table(DB_TABLE_NAME):
             df_vazio = pd.DataFrame(columns=COLUNAS_HISTORICO)
-            df_vazio.to_sql(DB_TABLE_NAME, engine, index=False)
+            df_vazio.to_sql(DB_TABLE_NAME, DB_ENGINE, index=False)
             print(f"Tabela '{DB_TABLE_NAME}' criada.")
 
-        existing_indexes = [index['name'] for index in inspector.get_indexes(DB_TABLE_NAME)]
-        with engine.connect() as connection:
+        existing_indexes = [index['name'] for index in inspector.get_indexes(DB_ENGINE, DB_TABLE_NAME)]
+        with DB_ENGINE.connect() as connection:
             if 'idx_timestamp' not in existing_indexes:
                 connection.execute(text(f'CREATE INDEX idx_timestamp ON {DB_TABLE_NAME} (timestamp)'))
                 print("Índice 'idx_timestamp' criado com sucesso.")
             if 'idx_id_ponto' not in existing_indexes:
                 connection.execute(text(f'CREATE INDEX idx_id_ponto ON {DB_TABLE_NAME} (id_ponto)'))
                 print("Índice 'idx_id_ponto' criado com sucesso.")
+            connection.commit()
+
         print("Banco de dados verificado e pronto.")
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO ao inicializar o banco de dados: {e}")
 
 
 def save_to_sqlite(df_novos_dados):
+    """Salva o DataFrame no SQLite, usando o DB_ENGINE global."""
+    global DB_ENGINE
     if df_novos_dados.empty: return
     try:
-        engine = get_engine()
         df_para_salvar = df_novos_dados.copy()
 
         if 'timestamp' in df_para_salvar.columns:
@@ -122,7 +137,7 @@ def save_to_sqlite(df_novos_dados):
 
         colunas_para_salvar = [col for col in COLUNAS_HISTORICO if col in df_para_salvar.columns]
         df_para_salvar = df_para_salvar[colunas_para_salvar]
-        df_para_salvar.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
+        df_para_salvar.to_sql(DB_TABLE_NAME, DB_ENGINE, if_exists='append', index=False)
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
             print(f"[SQLite] Aviso: Dados duplicados ignorados.")
@@ -131,7 +146,8 @@ def save_to_sqlite(df_novos_dados):
 
 
 def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
-    engine = get_engine()
+    """Lê dados do SQLite, usando o DB_ENGINE global."""
+    global DB_ENGINE
     query_base = f"SELECT * FROM {DB_TABLE_NAME}"
     conditions, params = [], {}
     if id_ponto:
@@ -151,7 +167,7 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         query_base += " WHERE " + " AND ".join(conditions)
     query_base += " ORDER BY timestamp ASC"
     try:
-        df = pd.read_sql_query(query_base, engine, params=params, parse_dates=["timestamp"])
+        df = pd.read_sql_query(query_base, DB_ENGINE, params=params, parse_dates=["timestamp"])
         if 'timestamp' in df.columns and df['timestamp'].dt.tz is None:
             df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
         return df
@@ -165,7 +181,11 @@ def get_recent_data_for_worker(hours=73):
 
 
 def get_all_data_for_dashboard():
-    df_completo = read_data_from_sqlite(last_hours=7 * 24)
+    # --- CORREÇÃO CRÍTICA: REDUÇÃO DA JANELA DE LEITURA ---
+    # Reduz de 7 dias para 2 dias para evitar o Gunicorn Timeout (120s) no Render.
+    df_completo = read_data_from_sqlite(last_hours=2 * 24)
+    # --- FIM DA CORREÇÃO ---
+
     status_atual = get_status_from_disk()
     try:
         with open(LOG_FILE, 'r', encoding='utf-8') as f:
@@ -188,13 +208,12 @@ def get_last_n_entries(n=4):
     Retorna o registro mais recente para CADA PONTO (o que garante que
     o print mostre o status de todos os KMs).
     """
-    engine = get_engine()
-
+    global DB_ENGINE
     # Busca um número suficiente de registros (50) ordenados pelo mais recente.
     query = f"SELECT * FROM {DB_TABLE_NAME} ORDER BY timestamp DESC LIMIT 50"
 
     try:
-        df = pd.read_sql_query(query, engine, parse_dates=["timestamp"])
+        df = pd.read_sql_query(query, DB_ENGINE, parse_dates=["timestamp"])
         if 'timestamp' in df.columns and df['timestamp'].dt.tz is None:
             df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
@@ -306,6 +325,11 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
 def fetch_data_from_zentra_cloud():
     end_date = datetime.datetime.now(datetime.timezone.utc)
     start_date = end_date - datetime.timedelta(days=1)
+
+    # --- PRINT DE DEBUG AQUI ---
+    print(f"[API] BUSCANDO DADOS ZENTRA (Incremental) para {ID_PONTO_ZENTRA_KM72}")
+    # --- FIM DO NOVO PRINT ---
+
     with httpx.Client() as client:
         for attempt in range(3):
             r = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, start_date, end_date)
@@ -316,13 +340,17 @@ def fetch_data_from_zentra_cloud():
         return None
     try:
         wc_data = next((d for n, d in r.json().get('data', {}).items() if 'water content' in n.lower()), None)
-        if not wc_data: return None
+        if not wc_data:
+            print(f"[API] Zentra: 'water content' não encontrado na resposta.")
+            return None
         latest_readings = {}
         for s_block in wc_data:
             port = s_block.get('metadata', {}).get('port_number')
             if port in MAPA_ZENTRA_KM72 and s_block.get('readings'):
                 val = s_block['readings'][0].get('value')
                 if val is not None: latest_readings[MAPA_ZENTRA_KM72[port]] = float(val) * 100.0
+
+        print(f"[API] Zentra: Dados de umidade lidos: {latest_readings}")
         return latest_readings if latest_readings else None
     except Exception as e:
         adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO Zentra (Processamento JSON): {e}")

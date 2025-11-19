@@ -1,5 +1,3 @@
-# config.py (COMPLETO, v12.1: Adicionando Disparo Inteligente)
-
 import os
 import datetime
 from dotenv import load_dotenv
@@ -19,7 +17,7 @@ WEATHERLINK_CONFIG = {
     "Ponto-A-KM67": {
         "STATION_ID": 179221,  # KM67
         "API_KEY": os.getenv('WL_API_KEY_KM67', "SUA_CHAVE_API_KM67"),
-        "API_SECRET": os.getenv('WL_API_SECRET_KM67', "SEU_SEGREDO_API_SEGREDO_KM67")
+        "API_SECRET": os.getenv('WL_API_SECRET_KM67', "SEU_SEGREDO_API_KM67")
     },
     "Ponto-B-KM72": {
         "STATION_ID": 197768,  # KM72
@@ -55,7 +53,7 @@ ID_PONTO_ZENTRA_KM72 = "Ponto-B-KM72"
 
 # --- CONFIGURAÇÕES DE DISPARO INTELIGENTE (RENDER KEEPALIVE) ---
 BACKFILL_RUN_TIME_SEC = 20 # Tempo máximo de processamento contínuo para backfill
-RENDER_SLEEP_TIME_SEC = 10 # Tempo de pausa para evitar timeout no Render
+RENDER_SLEEP_TIME_SEC = 30 # Tempo de pausa para evitar timeout no Render
 # --- FIM DAS CONFIGURAÇÕES DE DISPARO INTELIGENTE ---
 
 
