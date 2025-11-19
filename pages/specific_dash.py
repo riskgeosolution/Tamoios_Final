@@ -203,6 +203,15 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     df_ponto.loc[:, 'umidade_1m_perc'] = pd.to_numeric(df_ponto['umidade_1m_perc'], errors='coerce')
     df_ponto.loc[:, 'umidade_2m_perc'] = pd.to_numeric(df_ponto['umidade_2m_perc'], errors='coerce')
     df_ponto.loc[:, 'umidade_3m_perc'] = pd.to_numeric(df_ponto['umidade_3m_perc'], errors='coerce')
+
+    # --- INÍCIO DA CORREÇÃO: Preenchimento de dados de umidade ---
+    # Garante que o DataFrame esteja ordenado por tempo antes de preencher
+    df_ponto = df_ponto.sort_values('timestamp')
+    # Propaga o último valor de umidade válido para preencher os NaNs subsequentes
+    umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
+    # --- FIM DA CORREÇÃO ---
+
     status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
     risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
     status_geral_texto, status_geral_cor_bootstrap = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary",

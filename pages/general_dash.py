@@ -63,6 +63,12 @@ def update_general_dashboard(dados_json, selected_hours):
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: continue
 
+        # --- INÍCIO DA CORREÇÃO: Preenchimento de dados de umidade ---
+        df_ponto = df_ponto.sort_values('timestamp')
+        umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+        df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
+        # --- FIM DA CORREÇÃO ---
+
         ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
         limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
         df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
