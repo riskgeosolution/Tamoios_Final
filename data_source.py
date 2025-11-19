@@ -1,4 +1,4 @@
-# data_source.py (v12.5: CORREÇÃO CRÍTICA DE LEITURA DO DB)
+# data_source.py (COMPLETO, v12.14: Fix de Debug de Múltiplos Pontos)
 
 import pandas as pd
 import json
@@ -12,6 +12,7 @@ from io import StringIO
 import warnings
 import time
 from sqlalchemy import create_engine, inspect, text
+from httpx import HTTPStatusError
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -26,7 +27,7 @@ from config import (
 )
 
 DATA_DIR = "."
-DB_CONNECTION_STRING = "" 
+DB_CONNECTION_STRING = ""
 STATUS_FILE = os.path.join(DATA_DIR, "status_atual.json")
 LOG_FILE = os.path.join(DATA_DIR, "eventos.log")
 
@@ -36,6 +37,7 @@ COLUNAS_HISTORICO = [
     'base_1m', 'base_2m', 'base_3m'
 ]
 
+
 def adicionar_log(id_ponto, mensagem):
     try:
         log_entry = f"{datetime.datetime.now(datetime.timezone.utc).isoformat()} | {id_ponto} | {mensagem}\n"
@@ -44,11 +46,30 @@ def adicionar_log(id_ponto, mensagem):
     except Exception as e:
         print(f"ERRO CRÍTICO ao escrever no log: {e}")
 
+
+def ler_logs_eventos(id_ponto):
+    """
+    Lê o log do arquivo eventos.log e retorna o conteúdo filtrado como string.
+    """
+    try:
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            logs_str = f.read()
+
+        logs_list = logs_str.split('\n')
+        logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
+        return '\n'.join(logs_filtrados)
+
+    except FileNotFoundError:
+        return "Nenhum evento registrado ainda."
+    except Exception as e:
+        return f"ERRO ao ler logs: {e}"
+
+
 def setup_disk_paths():
-    print("--- data_source.py (v12.5 - Deploy Seguro) ---")
+    print("--- data_source.py (v12.14 - Debug de Múltiplos Pontos) ---")
     global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING
-    
-    DB_FILENAME = "temp_local_db.db" 
+
+    DB_FILENAME = "temp_local_db.db"
 
     if os.environ.get('RENDER'):
         DATA_DIR = "/var/data"
@@ -59,12 +80,14 @@ def setup_disk_paths():
 
     STATUS_FILE = os.path.join(DATA_DIR, "status_atual.json")
     LOG_FILE = os.path.join(DATA_DIR, "eventos.log")
-    
+
     print(f"Caminho do Disco de Dados: {DATA_DIR}")
     print(f"Banco de Dados (Fonte da Verdade): {DB_CONNECTION_STRING}")
 
+
 def get_engine():
     return create_engine(DB_CONNECTION_STRING)
+
 
 def initialize_database():
     try:
@@ -87,11 +110,16 @@ def initialize_database():
     except Exception as e:
         adicionar_log("GERAL", f"ERRO CRÍTICO ao inicializar o banco de dados: {e}")
 
+
 def save_to_sqlite(df_novos_dados):
     if df_novos_dados.empty: return
     try:
         engine = get_engine()
         df_para_salvar = df_novos_dados.copy()
+
+        if 'timestamp' in df_para_salvar.columns:
+            df_para_salvar['timestamp'] = pd.to_datetime(df_para_salvar['timestamp'], utc=True)
+
         colunas_para_salvar = [col for col in COLUNAS_HISTORICO if col in df_para_salvar.columns]
         df_para_salvar = df_para_salvar[colunas_para_salvar]
         df_para_salvar.to_sql(DB_TABLE_NAME, engine, if_exists='append', index=False)
@@ -101,24 +129,23 @@ def save_to_sqlite(df_novos_dados):
         else:
             adicionar_log("GERAL", f"ERRO CRÍTICO ao salvar no SQLite: {e}")
 
+
 def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
     engine = get_engine()
     query_base = f"SELECT * FROM {DB_TABLE_NAME}"
     conditions, params = [], {}
     if id_ponto:
-        conditions.append("id_ponto = :ponto"); params["ponto"] = id_ponto
+        conditions.append("id_ponto = :ponto");
+        params["ponto"] = id_ponto
     if last_hours:
         start_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=last_hours)
-    
-    # --- INÍCIO DA CORREÇÃO CRÍTICA ---
-    # O driver do SQLite espera strings para comparação de data/hora, não objetos datetime com timezone.
+
     if start_dt:
         conditions.append("timestamp >= :start")
         params["start"] = start_dt.strftime('%Y-%m-%d %H:%M:%S')
     if end_dt:
         conditions.append("timestamp < :end")
         params["end"] = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-    # --- FIM DA CORREÇÃO CRÍTICA ---
 
     if conditions:
         query_base += " WHERE " + " AND ".join(conditions)
@@ -132,11 +159,13 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         adicionar_log("GERAL", f"ERRO CRÍTICO ao ler do SQLite: {e}")
         return pd.DataFrame()
 
+
 def get_recent_data_for_worker(hours=73):
     return read_data_from_sqlite(last_hours=hours)
 
+
 def get_all_data_for_dashboard():
-    df_completo = read_data_from_sqlite(last_hours=7*24)
+    df_completo = read_data_from_sqlite(last_hours=7 * 24)
     status_atual = get_status_from_disk()
     try:
         with open(LOG_FILE, 'r', encoding='utf-8') as f:
@@ -145,6 +174,7 @@ def get_all_data_for_dashboard():
         logs = "Nenhum evento registrado ainda."
     return df_completo, status_atual, logs
 
+
 def get_status_from_disk():
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
@@ -152,44 +182,128 @@ def get_status_from_disk():
     except (FileNotFoundError, json.JSONDecodeError):
         return {p: "INDEFINIDO" for p in PONTOS_DE_ANALISE.keys()}
 
+
+def get_last_n_entries(n=4):
+    """
+    Retorna o registro mais recente para CADA PONTO (o que garante que
+    o print mostre o status de todos os KMs).
+    """
+    engine = get_engine()
+
+    # Busca um número suficiente de registros (50) ordenados pelo mais recente.
+    # Isso garante que teremos os 4 KMs se eles tiverem sido salvos recentemente.
+    query = f"SELECT * FROM {DB_TABLE_NAME} ORDER BY timestamp DESC LIMIT 50"
+
+    try:
+        df = pd.read_sql_query(query, engine, parse_dates=["timestamp"])
+        if 'timestamp' in df.columns and df['timestamp'].dt.tz is None:
+            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+
+        if df.empty:
+            return df
+
+        # Agrupa por 'id_ponto' e mantém o primeiro (mais recente) de cada grupo
+        # Isso garante que teremos um registro para cada KM que tem dados.
+        df_ultimos_por_ponto = df.drop_duplicates(subset=['id_ponto'], keep='first')
+
+        # Ordena o resultado final apenas pelo timestamp (para melhor visualização)
+        return df_ultimos_por_ponto.sort_values(by='timestamp', ascending=False)
+
+    except Exception as e:
+        adicionar_log("GERAL", f"ERRO ao buscar últimos registros por ponto: {e}")
+        return pd.DataFrame()
+
+
 def calculate_hmac_signature(params, api_secret):
     string_para_assinar = "".join(f"{key}{params[key]}" for key in sorted(params.keys()))
     return hmac.new(api_secret.encode('utf-8'), string_para_assinar.encode('utf-8'), hashlib.sha256).hexdigest()
+
 
 def arredondar_timestamp_15min(ts_epoch):
     dt_obj = datetime.datetime.fromtimestamp(ts_epoch, datetime.timezone.utc)
     return (dt_obj.replace(second=0, microsecond=0, minute=(dt_obj.minute // 15) * 15)).isoformat()
 
+
 def fetch_data_from_weatherlink_api():
     ENDPOINT = "https://api.weatherlink.com/v2/current/{station_id}"
     logs, dados = [], []
     t = str(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
+
     with httpx.Client(timeout=30.0) as client:
         for id_ponto, config in WEATHERLINK_CONFIG.items():
-            if "SUA_CHAVE" in config.get('API_KEY', ''): continue
-            params = {"api-key": config['API_KEY'], "station-id": str(config['STATION_ID']), "t": t}
-            params["api-signature"] = calculate_hmac_signature(params, config['API_SECRET'])
+            if "SUA_CHAVE" in config.get('API_KEY', ''):
+                print(f"[API] PULANDO {id_ponto}: Chave não configurada/contém placeholder.")
+                continue
+
+            # Print para confirmar a requisição
+            print(f"[API] REQUISITANDO {id_ponto} (Station ID: {config['STATION_ID']})")
+
+            params_to_sign = {
+                "api-key": config['API_KEY'],
+                "station-id": str(config['STATION_ID']),
+                "t": t
+            }
+            signature = calculate_hmac_signature(params_to_sign, config['API_SECRET'])
+
+            params_to_send = {
+                "api-key": config['API_KEY'],
+                "t": t,
+                "api-signature": signature
+            }
+
             try:
-                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params)
+                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params_to_send)
                 r.raise_for_status()
-                s = next((s['data'][0] for s in r.json().get('sensors', []) if s.get('sensor_type') == 48 and s.get('data')), None)
-                if not s or 'ts' not in s or (int(t) - s['ts']) > 1200:
+
+                # --- PRINT DE DEBUG DO JSON ---
+                print(f"WeatherLink API Response for {id_ponto}: Status 200, JSON: {r.json()}")
+                # --- FIM DO PRINT ---
+
+                s = next((
+                    s['data'][0] for s in r.json().get('sensors', [])
+                    if (s.get('data_structure_type') == 10 or s.get('sensor_type') == 48) and s.get('data')
+                ), None)
+
+                if not s or 'ts' not in s or (int(t) - s['ts']) > 3600:
                     logs.append({'id_ponto': id_ponto, 'mensagem': 'AVISO API: Estação offline ou dados atrasados.'})
                     continue
-                dados.append({"timestamp": arredondar_timestamp_15min(s['ts']), "id_ponto": id_ponto, "chuva_mm": s.get('rainfall_last_15_min_mm', 0.0), "precipitacao_acumulada_mm": s.get('rainfall_daily_mm')})
-                logs.append({'id_ponto': id_ponto, 'mensagem': f"API: Sucesso. Chuva 15min: {s.get('rainfall_last_15_min_mm', 0.0):.2f}mm"})
+
+                chuva_15 = s.get('rainfall_last_15_min_mm', 0.0)
+                if chuva_15 is None: chuva_15 = 0.0
+
+                dados.append({
+                    "timestamp": arredondar_timestamp_15min(s['ts']),
+                    "id_ponto": id_ponto,
+                    "chuva_mm": chuva_15,
+                    "precipitacao_acumulada_mm": s.get('rainfall_daily_mm')
+                })
+                logs.append({'id_ponto': id_ponto, 'mensagem': f"API: Sucesso. Chuva: {chuva_15:.2f}mm"})
             except Exception as e:
                 logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API: {e}"})
-    return pd.DataFrame(dados), None, logs
+
+    df = pd.DataFrame(dados)
+    if not df.empty and 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+
+    # --- PRINT DE DEBUG CRÍTICO AQUI ---
+    print("\n--- DEBUG: DataFrame WeatherLink FINAL antes de salvar ---")
+    print(df.to_string())
+    print("----------------------------------------------------------\n")
+    # --- FIM DO NOVO PRINT ---
+
+    return df, None, logs
+
 
 def _get_readings_zentra(client, station_serial, start_date, end_date):
     url = f"{ZENTRA_BASE_URL}/get_readings/"
-    params = {"device_sn": station_serial, "start": start_date.strftime("%Y-%m-%d"), "end": end_date.strftime("%Y-%m-%d")}
+    params = {"device_sn": station_serial, "start": start_date.strftime("%Y-%m-%d"),
+              "end": end_date.strftime("%Y-%m-%d")}
     headers = {"Authorization": f"Token {ZENTRA_API_TOKEN}"}
     try:
         return client.get(url, headers=headers, params=params, timeout=20.0)
     except httpx.TimeoutException:
         return None
+
 
 def fetch_data_from_zentra_cloud():
     end_date = datetime.datetime.now(datetime.timezone.utc)
@@ -216,11 +330,14 @@ def fetch_data_from_zentra_cloud():
         adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO Zentra (Processamento JSON): {e}")
         return None
 
+
 def backfill_zentra_km72_data():
     id_ponto = ID_PONTO_ZENTRA_KM72
     adicionar_log(id_ponto, "Iniciando backfill para Zentra.")
     df_ponto_existente = read_data_from_sqlite(id_ponto=id_ponto)
-    start_date = df_ponto_existente['timestamp'].max() if not df_ponto_existente.empty else datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc)
+    start_date = df_ponto_existente['timestamp'].max() if not df_ponto_existente.empty else datetime.datetime(2023, 1,
+                                                                                                              1,
+                                                                                                              tzinfo=datetime.timezone.utc)
     end_date = datetime.datetime.now(datetime.timezone.utc)
     total_registros_salvos = 0
     current_start = start_date
@@ -230,9 +347,11 @@ def backfill_zentra_km72_data():
         with httpx.Client(timeout=60.0) as client:
             response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, current_start, period_end)
         if not response or response.status_code != 200:
-            current_start += datetime.timedelta(days=7); continue
+            current_start += datetime.timedelta(days=7);
+            continue
         try:
-            wc_data = next((d for n, d in response.json().get('data', {}).items() if 'water content' in n.lower()), None)
+            wc_data = next((d for n, d in response.json().get('data', {}).items() if 'water content' in n.lower()),
+                           None)
             if not wc_data: current_start += datetime.timedelta(days=7); continue
             dados_por_timestamp = {}
             for sensor_block in wc_data:
@@ -242,11 +361,13 @@ def backfill_zentra_km72_data():
                     for reading in sensor_block.get('readings', []):
                         ts_iso, value = reading.get('datetime'), reading.get('value')
                         if ts_iso and value is not None:
-                            ts_arredondado = arredondar_timestamp_15min(datetime.datetime.fromisoformat(ts_iso).timestamp())
+                            ts_arredondado = arredondar_timestamp_15min(
+                                datetime.datetime.fromisoformat(ts_iso).timestamp())
                             if ts_arredondado not in dados_por_timestamp: dados_por_timestamp[ts_arredondado] = {}
                             dados_por_timestamp[ts_arredondado][coluna] = float(value) * 100.0
             if dados_por_timestamp:
-                df_bloco = pd.DataFrame([{'timestamp': ts, 'id_ponto': id_ponto, **v} for ts, v in dados_por_timestamp.items()])
+                df_bloco = pd.DataFrame(
+                    [{'timestamp': ts, 'id_ponto': id_ponto, **v} for ts, v in dados_por_timestamp.items()])
                 df_bloco['timestamp'] = pd.to_datetime(df_bloco['timestamp'], utc=True)
                 save_to_sqlite(df_bloco)
                 total_registros_salvos += len(df_bloco)
@@ -257,36 +378,71 @@ def backfill_zentra_km72_data():
     if total_registros_salvos > 0:
         adicionar_log(id_ponto, f"SUCESSO (Backfill Zentra): {total_registros_salvos} registros salvos.")
 
+
 def backfill_weatherlink_data(id_ponto):
     station_config = WEATHERLINK_CONFIG.get(id_ponto)
     if not station_config or "SUA_CHAVE" in station_config.get('API_KEY', ''): return
-    station_id, api_key, api_secret = station_config['STATION_ID'], station_config['API_KEY'], station_config['API_SECRET']
-    print(f"[API {id_ponto}] Iniciando Backfill de 72h...")
+    station_id, api_key, api_secret = station_config['STATION_ID'], station_config['API_KEY'], station_config[
+        'API_SECRET']
+    print(f"[API {id_ponto}] Iniciando Backfill de 96h...")
     url_base = f"https://api.weatherlink.com/v2/historic/{station_id}"
     dados_processados = []
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     try:
         with httpx.Client(timeout=60.0) as client:
-            for i in range(3):
+            for i in range(4):
                 end_dt = now_dt - datetime.timedelta(hours=24 * i)
                 start_dt = end_dt - datetime.timedelta(hours=24)
                 t = str(int(now_dt.timestamp()))
-                params = {"api-key": api_key, "end-timestamp": str(int(end_dt.timestamp())), "start-timestamp": str(int(start_dt.timestamp())), "station-id": str(station_id), "t": t}
-                params["api-signature"] = calculate_hmac_signature(params, api_secret)
-                response = client.get(url_base, params=params)
+
+                params_to_sign = {
+                    "api-key": api_key,
+                    "end-timestamp": str(int(end_dt.timestamp())),
+                    "start-timestamp": str(int(start_dt.timestamp())),
+                    "station-id": str(station_id),
+                    "t": t
+                }
+                signature = calculate_hmac_signature(params_to_sign, api_secret)
+
+                params_to_send = {
+                    "api-key": api_key,
+                    "end-timestamp": str(int(end_dt.timestamp())),
+                    "start-timestamp": str(int(start_dt.timestamp())),
+                    "t": t,
+                    "api-signature": signature
+                }
+
+                response = client.get(url_base, params=params_to_send)
                 response.raise_for_status()
+
                 data = response.json()
                 for sensor in data.get('sensors', []):
-                    if sensor.get('sensor_type') == 48:
+                    if sensor.get('sensor_type') == 48 or sensor.get('data_structure_type') == 10:
+                        # Iterar sobre os dados do sensor
                         for reg in sensor.get('data', []):
                             if 'rainfall_mm' in reg:
-                                dados_processados.append({"timestamp": arredondar_timestamp_15min(reg['ts']), "id_ponto": id_ponto, "chuva_mm": reg['rainfall_mm'], "precipitacao_acumulada_mm": reg.get('rainfall_daily_mm')})
-                if i < 2: time.sleep(1)
+                                dados_processados.append({
+                                    "timestamp": arredondar_timestamp_15min(reg['ts']),
+                                    "id_ponto": id_ponto,
+                                    "chuva_mm": reg['rainfall_mm'],
+                                    "precipitacao_acumulada_mm": reg.get('rainfall_daily_mm')
+                                })
+                if i < 3: time.sleep(1)
         if not dados_processados: return
         df_backfill = pd.DataFrame(dados_processados)
         df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
         save_to_sqlite(df_backfill)
         adicionar_log(id_ponto, f"SUCESSO (Backfill WeatherLink): {len(df_backfill)} registros salvos.")
+    except HTTPStatusError as e:
+        if e.response.status_code == 401:
+            adicionar_log(id_ponto, f"AVISO: Falha na autenticação (401) para {id_ponto}. Backfill pulado.")
+            print(f"[API {id_ponto}] AVISO: Falha na autenticação (401). Backfill pulado.")
+            return
+        else:
+            adicionar_log(id_ponto, f"ERRO API WeatherLink (Backfill): {e}")
+            print(f"[API {id_ponto}] ERRO API WeatherLink (Backfill): {e}")
+            traceback.print_exc()
     except Exception as e:
         adicionar_log(id_ponto, f"ERRO CRÍTICO (Backfill WeatherLink): {e}")
+        print(f"[API {id_ponto}] ERRO CRÍTICO (Backfill WeatherLink): {e}")
         traceback.print_exc()

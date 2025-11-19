@@ -1,4 +1,4 @@
-# gerador_pdf.py (v12.10: CORREÇÃO FINAL E DEFINITIVA DO GRÁFICO)
+# gerador_pdf.py (v12.11: MOVIDO CACHE PARA O TOPO PARA EVITAR CICLOS)
 
 import io
 from fpdf import FPDF
@@ -7,21 +7,30 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import threading
 import traceback
-
-import data_source
-from config import PONTOS_DE_ANALISE, RISCO_MAP, STATUS_MAP_HIERARQUICO, CORES_ALERTAS_CSS
 import matplotlib
 
 matplotlib.use('Agg')
+
+# ==============================================================================
+# --- DEFINIÇÕES DE CACHE E LOCKS (MOVIDO PARA O TOPO) ---
+# O erro "cannot import name 'PDF_CACHE_LOCK'" ocorre se a importação acontecer
+# antes destas linhas serem executadas.
+# ==============================================================================
 
 PDF_CACHE = {}
 PDF_CACHE_LOCK = threading.Lock()
 EXCEL_CACHE = {}
 EXCEL_CACHE_LOCK = threading.Lock()
 
-# ==============================================================================
+# --- IMPORTAÇÕES DE MÓDULOS LOCAIS ---
+import data_source
+from config import PONTOS_DE_ANALISE, RISCO_MAP, STATUS_MAP_HIERARQUICO, CORES_ALERTAS_CSS
+
+
+# -----------------------------------------------------------------------------
+
 # --- FUNÇÕES DE GERAÇÃO DE RELATÓRIO ---
-# ==============================================================================
+# ... (Restante do código da criação de relatórios, incluindo _get_and_consolidate_data, thread_gerar_pdf, etc.) ...
 
 def criar_relatorio_excel_em_memoria(df_consolidado, nome_ponto):
     output = io.BytesIO()
@@ -40,6 +49,7 @@ def criar_relatorio_excel_em_memoria(df_consolidado, nome_ponto):
             column_len = max(df_relatorio[col].astype(str).map(len).max(), len(col)) + 2
             worksheet.set_column(i, i, column_len)
     return output.getvalue()
+
 
 def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto):
     pdf = FPDF()
@@ -70,12 +80,17 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto):
     pdf.set_font("Helvetica", "", 8)
     for _, row in df_tabela.iterrows():
         pdf.cell(col_widths[0], 6, str(row['timestamp_local']), border=1, align="C")
-        pdf.cell(col_widths[1], 6, f"{row['chuva_mm']:.2f}" if pd.notna(row['chuva_mm']) else '0.00', border=1, align="C")
-        pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}%" if pd.notna(row['umidade_1m_perc']) else '-', border=1, align="C")
-        pdf.cell(col_widths[3], 6, f"{row['umidade_2m_perc']:.1f}%" if pd.notna(row['umidade_2m_perc']) else '-', border=1, align="C")
-        pdf.cell(col_widths[4], 6, f"{row['umidade_3m_perc']:.1f}%" if pd.notna(row['umidade_3m_perc']) else '-', border=1, align="C")
+        pdf.cell(col_widths[1], 6, f"{row['chuva_mm']:.2f}" if pd.notna(row['chuva_mm']) else '0.00', border=1,
+                 align="C")
+        pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}%" if pd.notna(row['umidade_1m_perc']) else '-',
+                 border=1, align="C")
+        pdf.cell(col_widths[3], 6, f"{row['umidade_2m_perc']:.1f}%" if pd.notna(row['umidade_2m_perc']) else '-',
+                 border=1, align="C")
+        pdf.cell(col_widths[4], 6, f"{row['umidade_3m_perc']:.1f}%" if pd.notna(row['umidade_3m_perc']) else '-',
+                 border=1, align="C")
         pdf.ln()
     return pdf.output(dest='S')
+
 
 def _add_matplotlib_fig(pdf, fig, base_title, periodo_str):
     full_title = f"{base_title} {periodo_str}"
@@ -93,33 +108,40 @@ def _add_matplotlib_fig(pdf, fig, base_title, periodo_str):
         pdf.cell(0, 5, f"AVISO: Não foi possível gerar o gráfico de {base_title}. Erro: {e}", ln=True, align="C")
         pdf.ln(5)
 
+
 def _criar_graficos_pdf(df_consolidado, nome_ponto):
     # --- GRÁFICO DE CHUVA (LÓGICA CORRIGIDA E LOCAL) ---
     fig_chuva, ax1 = plt.subplots(figsize=(10, 5))
-    ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#5F6B7C', alpha=0.8, label='Pluv. (mm/15min)', width=1/96)
+    ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#5F6B7C', alpha=0.8,
+            label='Pluv. (mm/15min)', width=1 / 96)
     ax1.set_xlabel("Data e Hora")
     ax1.set_ylabel("Pluviometria (mm/15min)", color='#2C3E50')
     ax1.tick_params(axis='x', rotation=45, labelsize=8)
     ax1.grid(True, linestyle='--', alpha=0.6)
-    
+
     ax2 = ax1.twinx()
     # CORREÇÃO: Cálculo do acumulado feito localmente, de forma segura.
     # A janela é 72h * 4 (intervalos de 15min por hora) = 288
     df_consolidado['chuva_acum_72h'] = df_consolidado['chuva_mm'].rolling(window=288, min_periods=1).sum()
-    ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_72h'], color='#007BFF', linewidth=2.5, label='Acumulada (72h)')
+    ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_72h'], color='#007BFF', linewidth=2.5,
+             label='Acumulada (72h)')
     ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
 
     fig_chuva.suptitle(f"Pluviometria - Estação {nome_ponto}", fontsize=12)
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines + lines2, labels + labels2, loc='upper center', ncol=2, fancybox=True, shadow=True, bbox_to_anchor=(0.5, -0.2))
+    ax2.legend(lines + lines2, labels + labels2, loc='upper center', ncol=2, fancybox=True, shadow=True,
+               bbox_to_anchor=(0.5, -0.2))
     fig_chuva.tight_layout(rect=[0, 0.05, 1, 0.95])
 
     # --- GRÁFICO DE UMIDADE ---
     fig_umidade, ax_umidade = plt.subplots(figsize=(10, 5))
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_1m_perc'], label='1m', color=CORES_ALERTAS_CSS['verde'], linewidth=2)
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_2m_perc'], label='2m', color=CORES_ALERTAS_CSS['laranja'], linewidth=2)
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_3m_perc'], label='3m', color=CORES_ALERTAS_CSS['vermelho'], linewidth=2)
+    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_1m_perc'], label='1m',
+                    color=CORES_ALERTAS_CSS['verde'], linewidth=2)
+    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_2m_perc'], label='2m',
+                    color=CORES_ALERTAS_CSS['laranja'], linewidth=2)
+    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_3m_perc'], label='3m',
+                    color=CORES_ALERTAS_CSS['vermelho'], linewidth=2)
     ax_umidade.set_title(f"Variação da Umidade do Solo - Estação {nome_ponto}", fontsize=12)
     ax_umidade.set_xlabel("Data e Hora")
     ax_umidade.set_ylabel("Umidade do Solo (%)")
@@ -127,21 +149,43 @@ def _criar_graficos_pdf(df_consolidado, nome_ponto):
     ax_umidade.tick_params(axis='x', rotation=45, labelsize=8)
     fig_umidade.legend(loc='upper center', ncol=3, fancybox=True, shadow=True, bbox_to_anchor=(0.5, -0.2))
     fig_umidade.tight_layout(rect=[0, 0.05, 1, 0.95])
-    
+
     return fig_chuva, fig_umidade
 
+
 def _get_and_consolidate_data(start_date, end_date, id_ponto):
+    # Converte datas de entrada para UTC
     start_dt = pd.to_datetime(start_date).tz_localize('America/Sao_Paulo').tz_convert('UTC')
     end_dt = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).tz_localize('America/Sao_Paulo').tz_convert('UTC')
+
+    # 1. Busca dados brutos do DB
     df_brutos = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
+
     if df_brutos.empty: return pd.DataFrame()
+
+    # --- INÍCIO DA CORREÇÃO CRÍTICA DE TIPAGEM (Resolve o TypeError) ---
+    cols_para_numeric = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+
+    for col in cols_para_numeric:
+        if col in df_brutos.columns:
+            # Garante que a coluna só tenha números (coerção de strings inválidas para NaN)
+            df_brutos[col] = pd.to_numeric(df_brutos[col], errors='coerce')
+    # --- FIM DA CORREÇÃO CRÍTICA DE TIPAGEM ---
+
+    # 2. Converte o timestamp para o fuso horário local (necessário para o resample)
     df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
+
+    # 3. Agrega os dados (Reamostragem em 15 minutos)
     df_consolidado = df_brutos.set_index('timestamp_local').resample('15T').agg({
-        'chuva_mm': 'sum', 'umidade_1m_perc': 'mean', 
-        'umidade_2m_perc': 'mean', 'umidade_3m_perc': 'mean'
+        'chuva_mm': 'sum',
+        'umidade_1m_perc': 'mean',
+        'umidade_2m_perc': 'mean',
+        'umidade_3m_perc': 'mean'
     }).reset_index()
+
     df_consolidado['chuva_mm'] = df_consolidado['chuva_mm'].fillna(0)
     return df_consolidado
+
 
 def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
     try:
@@ -156,6 +200,7 @@ def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
         traceback.print_exc()
         with EXCEL_CACHE_LOCK:
             EXCEL_CACHE[task_id] = {"status": "erro", "message": str(e)}
+
 
 def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
     try:
@@ -174,6 +219,7 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
         traceback.print_exc()
         with PDF_CACHE_LOCK:
             PDF_CACHE[task_id] = {"status": "erro", "message": str(e)}
+
 
 def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     pdf = FPDF()
@@ -195,9 +241,12 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
             dt_local = pd.to_datetime(timestamp_str_utc_iso).tz_convert('America/Sao_Paulo')
             timestamp_formatado = dt_local.strftime('%d/%m/%Y %H:%M:%S')
             cor = (0, 0, 0)
-            if "ERRO" in msg_str: cor = (200, 0, 0)
-            elif "AVISO" in msg_str: cor = (200, 150, 0)
-            elif "MUDANÇA" in msg_str: cor = (0, 0, 200)
+            if "ERRO" in msg_str:
+                cor = (200, 0, 0)
+            elif "AVISO" in msg_str:
+                cor = (200, 150, 0)
+            elif "MUDANÇA" in msg_str:
+                cor = (0, 0, 200)
             pdf.set_text_color(*cor)
             pdf.write(5, f"[{timestamp_formatado}] {ponto_str}: {msg_str}\n")
         except Exception:

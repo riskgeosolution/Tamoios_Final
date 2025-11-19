@@ -162,36 +162,6 @@ def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
         return "grey"
 
 
-# --- NOVO: FUNÇÃO PARA LER LOGS DO DISCO (CORRIGIDA) ---
-def ler_logs_eventos(id_ponto):
-    """
-    Lê o log do arquivo eventos.log e retorna o conteúdo filtrado como string.
-    """
-    # --- INÍCIO DA CORREÇÃO (Importação Circular) ---
-    import data_source
-    # --- FIM DA CORREÇÃO ---
-
-    try:
-        # --- INÍCIO DA CORREÇÃO (Lógica com Bug) ---
-        # Esta função agora só usa a importação local
-
-        # O data_source.get_all_data_from_disk() retorna (historico_df, status, logs_str)
-        # O log string é o terceiro elemento retornado.
-        _, _, logs_str = data_source.get_all_data_from_disk()
-        # --- FIM DA CORREÇÃO ---
-
-        # Filtra a string de logs
-        logs_list = logs_str.split('\n')
-        # Filtra por ponto específico ou logs gerais
-        logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
-
-        # Retorna logs como uma única string (com nova linha)
-        return '\n'.join(logs_filtrados)
-
-    except Exception as e:
-        return f"ERRO ao ler logs: {e}"
-
-
 # --- INÍCIO DA NOVA FUNÇÃO (TRAVA DE SEGURANÇA DA BASE) ---
 def verificar_trava_base(df_historico_ponto, coluna_umidade, nova_leitura, base_antiga, horas=6):
     """
