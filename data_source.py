@@ -1,4 +1,4 @@
-# data_source.py (COMPLETO, v12.14: Fix de Debug de Múltiplos Pontos)
+# data_source.py (v12.16: COM TIMER DE KEEPALIVE IMPLEMENTADO)
 
 import pandas as pd
 import json
@@ -18,7 +18,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from config import (
     PONTOS_DE_ANALISE, CONSTANTES_PADRAO,
-    FREQUENCIA_API_SEGUNDOS,
+    FREQUENCIA_API_SEGUNDOS, BACKFILL_RUN_TIME_SEC,  # <<< IMPORTAÇÃO NECESSÁRIA
     MAX_HISTORICO_PONTOS,
     WEATHERLINK_CONFIG,
     DB_TABLE_NAME,
@@ -66,7 +66,7 @@ def ler_logs_eventos(id_ponto):
 
 
 def setup_disk_paths():
-    print("--- data_source.py (v12.14 - Debug de Múltiplos Pontos) ---")
+    print("--- data_source.py (v12.16 - Finalizando Debug) ---")
     global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING
 
     DB_FILENAME = "temp_local_db.db"
@@ -191,7 +191,6 @@ def get_last_n_entries(n=4):
     engine = get_engine()
 
     # Busca um número suficiente de registros (50) ordenados pelo mais recente.
-    # Isso garante que teremos os 4 KMs se eles tiverem sido salvos recentemente.
     query = f"SELECT * FROM {DB_TABLE_NAME} ORDER BY timestamp DESC LIMIT 50"
 
     try:
@@ -203,7 +202,6 @@ def get_last_n_entries(n=4):
             return df
 
         # Agrupa por 'id_ponto' e mantém o primeiro (mais recente) de cada grupo
-        # Isso garante que teremos um registro para cada KM que tem dados.
         df_ultimos_por_ponto = df.drop_duplicates(subset=['id_ponto'], keep='first')
 
         # Ordena o resultado final apenas pelo timestamp (para melhor visualização)
@@ -341,7 +339,16 @@ def backfill_zentra_km72_data():
     end_date = datetime.datetime.now(datetime.timezone.utc)
     total_registros_salvos = 0
     current_start = start_date
+
+    start_time = time.time()  # Início do timer
+    time_limit = BACKFILL_RUN_TIME_SEC  # Usando a constante definida em config.py
+
     while current_start < end_date:
+        if (time.time() - start_time) > time_limit:  # Check time limit
+            adicionar_log(id_ponto,
+                          f"PAUSA (Backfill Zentra): Limite de {time_limit}s atingido. {total_registros_salvos} salvos nesta sessao.")
+            return False  # Signal to stop/pause
+
         period_end = min(current_start + datetime.timedelta(days=7), end_date)
         print(f"[API Zentra Backfill] Buscando bloco: {current_start.date()} a {period_end.date()}")
         with httpx.Client(timeout=60.0) as client:
@@ -378,6 +385,8 @@ def backfill_zentra_km72_data():
     if total_registros_salvos > 0:
         adicionar_log(id_ponto, f"SUCESSO (Backfill Zentra): {total_registros_salvos} registros salvos.")
 
+    return True  # Sinaliza que o backfill foi concluído
+
 
 def backfill_weatherlink_data(id_ponto):
     station_config = WEATHERLINK_CONFIG.get(id_ponto)
@@ -388,9 +397,17 @@ def backfill_weatherlink_data(id_ponto):
     url_base = f"https://api.weatherlink.com/v2/historic/{station_id}"
     dados_processados = []
     now_dt = datetime.datetime.now(datetime.timezone.utc)
+
+    start_time = time.time()  # Início do timer
+    time_limit = BACKFILL_RUN_TIME_SEC  # Usando a constante definida em config.py
+
     try:
         with httpx.Client(timeout=60.0) as client:
             for i in range(4):
+                if (time.time() - start_time) > time_limit:  # Check time limit
+                    adicionar_log(id_ponto, f"PAUSA (Backfill WL): Limite de {time_limit}s atingido.")
+                    return False  # Signal to stop/pause
+
                 end_dt = now_dt - datetime.timedelta(hours=24 * i)
                 start_dt = end_dt - datetime.timedelta(hours=24)
                 t = str(int(now_dt.timestamp()))
@@ -428,21 +445,25 @@ def backfill_weatherlink_data(id_ponto):
                                     "precipitacao_acumulada_mm": reg.get('rainfall_daily_mm')
                                 })
                 if i < 3: time.sleep(1)
-        if not dados_processados: return
+        if not dados_processados: return True  # Concluído, mas sem dados
         df_backfill = pd.DataFrame(dados_processados)
         df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
         save_to_sqlite(df_backfill)
         adicionar_log(id_ponto, f"SUCESSO (Backfill WeatherLink): {len(df_backfill)} registros salvos.")
+        return True  # Sinaliza que o backfill foi concluído
+
     except HTTPStatusError as e:
         if e.response.status_code == 401:
             adicionar_log(id_ponto, f"AVISO: Falha na autenticação (401) para {id_ponto}. Backfill pulado.")
             print(f"[API {id_ponto}] AVISO: Falha na autenticação (401). Backfill pulado.")
-            return
+            return True  # Concluído/Pulado, não precisa de restart
         else:
             adicionar_log(id_ponto, f"ERRO API WeatherLink (Backfill): {e}")
             print(f"[API {id_ponto}] ERRO API WeatherLink (Backfill): {e}")
             traceback.print_exc()
+            return True  # Concluído/Falhou, não precisa de restart
     except Exception as e:
         adicionar_log(id_ponto, f"ERRO CRÍTICO (Backfill WeatherLink): {e}")
         print(f"[API {id_ponto}] ERRO CRÍTICO (Backfill WeatherLink): {e}")
         traceback.print_exc()
+        return True  # Concluído/Falhou, não precisa de restart

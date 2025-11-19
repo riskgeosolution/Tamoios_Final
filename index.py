@@ -1,4 +1,4 @@
-# index.py (COMPLETO, v12.9: Backfill ACIONADO DEPOIS DO SALVAMENTO)
+# index.py (COMPLETO, v12.11: Final com Fix de Tipagem e Importação)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -8,7 +8,7 @@ import pandas as pd
 from io import StringIO
 import os
 import json
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # <<< FIX: IMPORTAÇÃO ADICIONADA
 import time
 from threading import Thread
 import datetime
@@ -70,6 +70,15 @@ def worker_main_loop():
         historico_recente_df = data_source.get_recent_data_for_worker(hours=73)
         status_antigos_do_disco = data_source.get_status_from_disk()
 
+        # --- BLOCO DE CORREÇÃO CRÍTICA DE TIPAGEM (Linha ~68) ---
+        # Garantir que as colunas numéricas no histórico são floats antes de qualquer cálculo (min())
+        numeric_cols_history = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+        for col in numeric_cols_history:
+            if col in historico_recente_df.columns:
+                # Usando o .loc para evitar o SettingWithCopyWarning e garantindo a coerção para float
+                historico_recente_df.loc[:, col] = pd.to_numeric(historico_recente_df[col], errors='coerce')
+        # --- FIM DO BLOCO DE CORREÇÃO ---
+
         novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
 
         df_umidade_incremental = pd.DataFrame()
@@ -85,10 +94,8 @@ def worker_main_loop():
             data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO (Incremental Zentra): {e}")
 
         # --- CORREÇÃO CRÍTICA: SALVAMENTO ANTES DE FAZER O BACKFILL ---
-        # 1. Concatena os novos dados (chuva + umidade)
         df_novos = pd.concat([novos_dados_chuva_df, df_umidade_incremental], ignore_index=True)
 
-        # 2. SALVA NO SQLITE (AGORA GARANTIDO!)
         if not df_novos.empty:
             data_source.save_to_sqlite(df_novos)
             historico_para_calculo = pd.concat([historico_recente_df, df_novos], ignore_index=True)
@@ -96,9 +103,8 @@ def worker_main_loop():
             historico_para_calculo = historico_recente_df
         # --- FIM DA CORREÇÃO ---
 
-        # --- INÍCIO DA DETECÇÃO DE BACKFILL (Para reiniciar o loop, mas o salvamento já foi feito) ---
+        # --- INÍCIO DA DETECÇÃO DE BACKFILL ---
 
-        # 1. Checa Lacuna WeatherLink
         if not novos_dados_chuva_df.empty:
             for id_ponto in novos_dados_chuva_df['id_ponto'].unique():
                 df_ponto_recente = historico_recente_df[historico_recente_df['id_ponto'] == id_ponto]
@@ -114,7 +120,6 @@ def worker_main_loop():
                         data_source.adicionar_log(id_ponto,
                                                   "AVISO: Lacuna de dados detectada. Backfill automático não acionado para este ponto.")
 
-        # 2. Checa Lacuna Zentra
         if not df_umidade_incremental.empty:
             df_ponto_zentra = historico_recente_df[historico_recente_df['id_ponto'] == ID_PONTO_ZENTRA_KM72]
             if not df_ponto_zentra.empty and (df_umidade_incremental['timestamp'].min() - df_ponto_zentra[
@@ -123,7 +128,6 @@ def worker_main_loop():
                 data_source.backfill_zentra_km72_data()
                 trigger_backfill = True
 
-        # Se algum backfill foi acionado, reinicia o loop
         if trigger_backfill:
             return False
         # --- FIM DA DETECÇÃO DE BACKFILL ---
@@ -305,7 +309,7 @@ data_source.setup_disk_paths()
 if not os.environ.get("WERKZEUG_MAIN"):
     print("Iniciando o worker (coletor de dados) em um thread separado...")
     Thread(target=background_task_wrapper, daemon=True).start()
-else:  # <-- O 'else' da linha 201 DEVE estar alinhado com o 'if' acima.
+else:
     print("O reloader do Dash está ativo. O worker não será iniciado neste processo.")
 
 if __name__ == '__main__':
