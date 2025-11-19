@@ -1,4 +1,4 @@
-# pages/specific_dash.py (COMPLETO E CORRIGIDO - VERSÃO FINAL)
+# pages/specific_dash.py (COMPLETO - VERSÃO SINCRONIZADA)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -18,7 +18,7 @@ import uuid
 from threading import Thread
 import json
 
-# Configura o Matplotlib (Mantido)
+# Configura o Matplotlib
 plt.switch_backend('Agg')
 
 # --- IMPORTAÇÕES ---
@@ -26,14 +26,13 @@ from app import app, TEMPLATE_GRAFICO_MODERNO
 from config import (
     PONTOS_DE_ANALISE, CONSTANTES_PADRAO, FREQUENCIA_API_SEGUNDOS,
     RISCO_MAP, STATUS_MAP_HIERARQUICO,
-    # Certifique-se que estas variáveis estão no seu config.py
     CORES_UMIDADE, DELTA_TRIGGER_UMIDADE
 )
 import processamento
 import gerador_pdf
 import data_source
 
-# Importação das travas e caches do gerador_pdf
+# Travas e Caches
 from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
 
 
@@ -136,7 +135,7 @@ def get_layout():
     return layout
 
 
-# --- Callbacks de Plotly e Título ---
+# --- Callbacks Principais ---
 
 @app.callback(
     Output('specific-dash-title', 'children'),
@@ -194,25 +193,44 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     if df_ponto.empty:
         return dbc.Alert("Sem dados históricos para este ponto.", color="warning", className="m-3"), "", id_ponto
 
-    # Tratamento de timestamps e numéricos
+    # --- LIMPEZA E ORDENAÇÃO CRÍTICA (GARANTE QUE CARD == GRÁFICO) ---
+
+    # 1. Converte Timestamp e padroniza UTC
     df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
     if df_ponto['timestamp'].dt.tz is None:
         df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_localize('UTC')
     else:
         df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_convert('UTC')
 
-    df_ponto.loc[:, 'timestamp_local'] = df_ponto['timestamp'].dt.tz_convert('America/Sao_Paulo')
-    df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
-    df_ponto.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_ponto['precipitacao_acumulada_mm'], errors='coerce')
-    df_ponto.loc[:, 'umidade_1m_perc'] = pd.to_numeric(df_ponto['umidade_1m_perc'], errors='coerce')
-    df_ponto.loc[:, 'umidade_2m_perc'] = pd.to_numeric(df_ponto['umidade_2m_perc'], errors='coerce')
-    df_ponto.loc[:, 'umidade_3m_perc'] = pd.to_numeric(df_ponto['umidade_3m_perc'], errors='coerce')
+    # 2. Remove duplicatas exatas de tempo (visto nos logs)
+    df_ponto = df_ponto.drop_duplicates(subset=['timestamp'], keep='last')
 
-    # --- CORREÇÃO 1: Preenchimento de falhas (Buracos no sensor) ---
+    # 3. Ordena cronologicamente (O Card pega sempre o último dessa fila)
     df_ponto = df_ponto.sort_values('timestamp')
+
+    # 4. Cria horário local
+    df_ponto.loc[:, 'timestamp_local'] = df_ponto['timestamp'].dt.tz_convert('America/Sao_Paulo')
+
+    # 5. Converte colunas numéricas
+    cols_numericas = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    for col in cols_numericas:
+        df_ponto.loc[:, col] = pd.to_numeric(df_ponto[col], errors='coerce')
+
+    # --- DEBUG TEMPORÁRIO (Verificar logs do Render) ---
+    try:
+        print(f"\n[DEBUG] ID: {id_ponto}")
+        print(f"[DEBUG] Linhas (Pós-Limpeza): {len(df_ponto)}")
+        print("[DEBUG] Últimas 2 linhas usadas:")
+        print(df_ponto[['timestamp_local', 'umidade_1m_perc']].tail(2).to_string())
+    except Exception:
+        pass
+    # ---------------------------------------------------
+
+    # --- Preenchimento de Falhas (FFILL) ---
+    # Garante continuidade do gráfico sem mudar o valor real do último ponto
     umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
     df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
-    # --------------------------------------------------------------
+    # ---------------------------------------
 
     # Status e Risco
     status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
@@ -222,23 +240,24 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     card_class_color = "bg-" + status_geral_cor_bootstrap if status_geral_cor_bootstrap not in ["warning", "orange",
                                                                                                 "danger"] else "bg-" + status_geral_cor_bootstrap
 
-    # Filtro de Tempo para o Gráfico
+    # Filtro de Tempo
     ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
 
-    # --- CORREÇÃO 2: Reamostragem usando 'last' para bater com o Card ---
+    # --- REAMOSTRAGEM SINCRONIZADA ---
+    # Usa 'last' para garantir que o gráfico termine EXATAMENTE no mesmo valor da tabela bruta
     if not df_ponto_plot.empty:
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg({
             'chuva_mm': 'sum',
-            'umidade_1m_perc': 'last',  # AQUI: Usa o último valor do intervalo, não a média
-            'umidade_2m_perc': 'last',  # AQUI: Usa o último valor do intervalo
-            'umidade_3m_perc': 'last'  # AQUI: Usa o último valor do intervalo
+            'umidade_1m_perc': 'last',
+            'umidade_2m_perc': 'last',
+            'umidade_3m_perc': 'last'
         }).reset_index()
     else:
         df_plot_15min = pd.DataFrame(
             columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
-    # --------------------------------------------------------------------
+    # ----------------------------------------------------------
 
     # Cálculo de Chuva Acumulada
     n_horas_titulo = selected_hours
@@ -253,8 +272,11 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         ].copy()
 
     try:
-        # Último dado REAL (cru) para o Card
-        ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
+        # --- DEFINIÇÃO DO CARD (SINCRONIZADO) ---
+        # Pega a última linha do DataFrame já ordenado e limpo.
+        # Como o gráfico usou 'last' nesse mesmo DF, os valores são matematicamente idênticos.
+        ultimo_dado = df_ponto.iloc[-1]
+
         ultima_chuva_72h = df_chuva_72h_completo.iloc[-1]['chuva_mm'] if not df_chuva_72h_completo.empty else 0.0
         ultima_chuva_72h = ultima_chuva_72h if not pd.isna(ultima_chuva_72h) else 0.0
 
@@ -329,20 +351,19 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     fig_chuva.update_yaxes(title_text="Pluviometria (mm/15min)", secondary_y=False);
     fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)
 
-    # --- Gráfico de Umidade (Com Barras Invisíveis para Hover) ---
+    # --- Gráfico de Umidade ---
     fig_umidade = go.Figure()
 
-    # 1. Adiciona as barras invisíveis para facilitar o clique/hover
+    # Barras invisíveis para Hover
     fig_umidade.add_trace(go.Bar(
         x=df_plot_15min['timestamp_local'],
-        # O valor de Y é alto apenas para criar a área de clique
         y=[(df_plot_15min['umidade_3m_perc'].max()) * 1.1] * len(df_plot_15min) if not df_plot_15min.empty else [],
         hoverinfo='none',
         showlegend=False,
-        marker_opacity=0  # Totalmente transparente
+        marker_opacity=0
     ))
 
-    # 2. Adiciona as linhas de umidade visíveis
+    # Linhas visíveis
     fig_umidade.add_trace(go.Scatter(
         x=df_plot_15min['timestamp_local'],
         y=df_plot_15min['umidade_1m_perc'],
@@ -373,12 +394,12 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         xaxis_title="Data e Hora",
         yaxis_title="Umidade do Solo (%)",
         hovermode="x unified",
-        bargap=0,  # Importante para as barras invisíveis se tocarem
+        bargap=0,
         hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial")
     )
     fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
 
-    # --- Controle Dinâmico do Eixo Y (0 a 50%) ---
+    # Range Y (0-50%)
     try:
         all_umidade_data = pd.concat([
             df_plot_15min['umidade_1m_perc'],
@@ -391,13 +412,11 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         else:
             data_min = all_umidade_data.min()
             data_max = all_umidade_data.max()
-            # Garante que o gráfico mostre pelo menos de 0 a 50, ou expanda se necessário
             final_min = min(0, data_min - 5)
             final_max = max(50, data_max + 5)
 
         fig_umidade.update_yaxes(range=[final_min, final_max])
-    except Exception as e:
-        print(f"Erro ao definir range Y da umidade: {e}")
+    except Exception:
         pass
 
     layout_graficos = [
@@ -409,7 +428,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     return layout_cards, layout_graficos, id_ponto
 
 
-# --- Callbacks de Logs ---
+# --- Callbacks de Logs (Mantidos) ---
 
 @app.callback(
     Output('modal-logs', 'is_open'),
