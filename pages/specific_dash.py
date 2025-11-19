@@ -1,4 +1,4 @@
-# pages/specific_dash.py (COMPLETO, CORRIGIDO)
+# pages/specific_dash.py (COMPLETO E CORRIGIDO - VERSÃO FINAL)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -16,27 +16,25 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import uuid
 from threading import Thread
+import json
 
 # Configura o Matplotlib (Mantido)
 plt.switch_backend('Agg')
 
-# --- IMPORTAÇÕES (CORRIGIDAS) ---
+# --- IMPORTAÇÕES ---
 from app import app, TEMPLATE_GRAFICO_MODERNO
 from config import (
     PONTOS_DE_ANALISE, CONSTANTES_PADRAO, FREQUENCIA_API_SEGUNDOS,
     RISCO_MAP, STATUS_MAP_HIERARQUICO,
-    # --- NOVA IMPORTAÇÃO ---
+    # Certifique-se que estas variáveis estão no seu config.py
     CORES_UMIDADE, DELTA_TRIGGER_UMIDADE
 )
 import processamento
 import gerador_pdf
 import data_source
 
-# --- CORREÇÃO DE IMPORTE (Do erro anterior) ---
+# Importação das travas e caches do gerador_pdf
 from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
-
-
-# --- Mapas de Cores (REMOVIDOS DAQUI, AGORA EM CONFIG.PY) ---
 
 
 # --- Layout da Página Específica ---
@@ -138,7 +136,7 @@ def get_layout():
     return layout
 
 
-# --- Callbacks de Plotly e Título (Mantidos) ---
+# --- Callbacks de Plotly e Título ---
 
 @app.callback(
     Output('specific-dash-title', 'children'),
@@ -180,23 +178,29 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         config = PONTOS_DE_ANALISE[id_ponto]
     except KeyError:
         return "Ponto não encontrado", "Erro: Ponto inválido.", None
+
     constantes_ponto = config.get('constantes', CONSTANTES_PADRAO)
     base_1m = constantes_ponto.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
     base_2m = constantes_ponto.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
     base_3m = constantes_ponto.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
+
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
         status_atual_dict = status_json
     except Exception as e:
         return "Erro ao carregar dados.", "", id_ponto
+
     df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
     if df_ponto.empty:
         return dbc.Alert("Sem dados históricos para este ponto.", color="warning", className="m-3"), "", id_ponto
+
+    # Tratamento de timestamps e numéricos
     df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
     if df_ponto['timestamp'].dt.tz is None:
         df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_localize('UTC')
     else:
         df_ponto.loc[:, 'timestamp'] = df_ponto['timestamp'].dt.tz_convert('UTC')
+
     df_ponto.loc[:, 'timestamp_local'] = df_ponto['timestamp'].dt.tz_convert('America/Sao_Paulo')
     df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce')
     df_ponto.loc[:, 'precipitacao_acumulada_mm'] = pd.to_numeric(df_ponto['precipitacao_acumulada_mm'], errors='coerce')
@@ -204,54 +208,64 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     df_ponto.loc[:, 'umidade_2m_perc'] = pd.to_numeric(df_ponto['umidade_2m_perc'], errors='coerce')
     df_ponto.loc[:, 'umidade_3m_perc'] = pd.to_numeric(df_ponto['umidade_3m_perc'], errors='coerce')
 
-    # --- INÍCIO DA CORREÇÃO: Preenchimento de dados de umidade ---
-    # Garante que o DataFrame esteja ordenado por tempo antes de preencher
+    # --- CORREÇÃO 1: Preenchimento de falhas (Buracos no sensor) ---
     df_ponto = df_ponto.sort_values('timestamp')
-    # Propaga o último valor de umidade válido para preencher os NaNs subsequentes
     umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
     df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
-    # --- FIM DA CORREÇÃO ---
+    # --------------------------------------------------------------
 
+    # Status e Risco
     status_geral_ponto_txt = status_atual_dict.get(id_ponto, "INDEFINIDO")
     risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
     status_geral_texto, status_geral_cor_bootstrap = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary",
                                                                                               "bg-secondary"))[:2]
     card_class_color = "bg-" + status_geral_cor_bootstrap if status_geral_cor_bootstrap not in ["warning", "orange",
                                                                                                 "danger"] else "bg-" + status_geral_cor_bootstrap
+
+    # Filtro de Tempo para o Gráfico
     ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
 
-    # --- ALTERAÇÃO: Reamostragem para 15 minutos para plotagem ---
+    # --- CORREÇÃO 2: Reamostragem usando 'last' para bater com o Card ---
     if not df_ponto_plot.empty:
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg({
             'chuva_mm': 'sum',
-            'umidade_1m_perc': 'mean',
-            'umidade_2m_perc': 'mean',
-            'umidade_3m_perc': 'mean'
+            'umidade_1m_perc': 'last',  # AQUI: Usa o último valor do intervalo, não a média
+            'umidade_2m_perc': 'last',  # AQUI: Usa o último valor do intervalo
+            'umidade_3m_perc': 'last'  # AQUI: Usa o último valor do intervalo
         }).reset_index()
     else:
-        df_plot_15min = pd.DataFrame(columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
+        df_plot_15min = pd.DataFrame(
+            columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
+    # --------------------------------------------------------------------
 
+    # Cálculo de Chuva Acumulada
     n_horas_titulo = selected_hours
     df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
     df_chuva_FILTRO_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
+
     df_chuva_FILTRO_plot = df_chuva_FILTRO_completo[
         df_chuva_FILTRO_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
+
     df_chuva_72h_plot = df_chuva_72h_completo[
         df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()
-    ].copy()
+        ].copy()
+
     try:
+        # Último dado REAL (cru) para o Card
         ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
         ultima_chuva_72h = df_chuva_72h_completo.iloc[-1]['chuva_mm'] if not df_chuva_72h_completo.empty else 0.0
         ultima_chuva_72h = ultima_chuva_72h if not pd.isna(ultima_chuva_72h) else 0.0
 
+        # Lógica de Cores
         css_color_s1 = CORES_UMIDADE['1m'] if (ultimo_dado.get('umidade_1m_perc',
                                                                base_1m) - base_1m) >= DELTA_TRIGGER_UMIDADE else 'green'
         css_color_s2 = CORES_UMIDADE['2m'] if (ultimo_dado.get('umidade_2m_perc',
                                                                base_2m) - base_2m) >= DELTA_TRIGGER_UMIDADE else 'green'
         css_color_s3 = CORES_UMIDADE['3m'] if (ultimo_dado.get('umidade_3m_perc',
                                                                base_3m) - base_3m) >= DELTA_TRIGGER_UMIDADE else 'green'
+
         layout_cards = [
             dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Atual", style={'color': '#000000', 'font-weight': 'bold'}),
                                            html.P(status_geral_texto, className="fs-3",
@@ -280,6 +294,8 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         ]
     except IndexError:
         return "Dados insuficientes.", "", id_ponto
+
+    # Ajuste de Timestamp local para os gráficos auxiliares
     for df in [df_chuva_FILTRO_plot, df_chuva_72h_plot]:
         if 'timestamp' in df.columns:
             if df['timestamp'].dt.tz is None:
@@ -287,6 +303,8 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
             df.loc[:, 'timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
         else:
             df.loc[:, 'timestamp_local'] = df['timestamp']
+
+    # --- Gráfico de Chuva ---
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
     fig_chuva.add_trace(
         go.Bar(x=df_plot_15min['timestamp_local'], y=df_plot_15min['chuva_mm'], name='Pluv. 15 min (mm)',
@@ -295,12 +313,12 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'],
                                    name=f'Acumulada ({n_horas_titulo}h)', mode='lines',
                                    line=dict(color='#007BFF', width=2.5)),
-                      secondary_y=True)
+                        secondary_y=True)
     fig_chuva.add_trace(go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'],
                                    name='Acumulada (72h)', mode='lines',
                                    line=dict(color='green', width=2, dash='dot'),
                                    visible='legendonly'),
-                      secondary_y=True)
+                        secondary_y=True)
     fig_chuva.update_layout(title_text=f"Pluviometria - Estação {config['nome']} ({n_horas_titulo}h)",
                             template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=50, b=80),
                             legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
@@ -311,20 +329,20 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     fig_chuva.update_yaxes(title_text="Pluviometria (mm/15min)", secondary_y=False);
     fig_chuva.update_yaxes(title_text=f"Acumulada ({n_horas_titulo}h)", secondary_y=True)
 
-    # --- INÍCIO DA ALTERAÇÃO: Gráfico de Umidade com barras invisíveis ---
+    # --- Gráfico de Umidade (Com Barras Invisíveis para Hover) ---
     fig_umidade = go.Figure()
 
-    # Adiciona as barras invisíveis que servirão de "chão" para o mouse
+    # 1. Adiciona as barras invisíveis para facilitar o clique/hover
     fig_umidade.add_trace(go.Bar(
         x=df_plot_15min['timestamp_local'],
-        # O valor de Y não importa, pois a barra é invisível
-        y=[(df_plot_15min['umidade_3m_perc'].max())*1.1]*len(df_plot_15min) if not df_plot_15min.empty else [],
+        # O valor de Y é alto apenas para criar a área de clique
+        y=[(df_plot_15min['umidade_3m_perc'].max()) * 1.1] * len(df_plot_15min) if not df_plot_15min.empty else [],
         hoverinfo='none',
         showlegend=False,
-        marker_opacity=0
+        marker_opacity=0  # Totalmente transparente
     ))
 
-    # Adiciona as linhas de umidade, que serão as informações visíveis
+    # 2. Adiciona as linhas de umidade visíveis
     fig_umidade.add_trace(go.Scatter(
         x=df_plot_15min['timestamp_local'],
         y=df_plot_15min['umidade_1m_perc'],
@@ -355,13 +373,12 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         xaxis_title="Data e Hora",
         yaxis_title="Umidade do Solo (%)",
         hovermode="x unified",
-        bargap=0,  # Garante que as barras invisíveis se toquem
+        bargap=0,  # Importante para as barras invisíveis se tocarem
         hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial")
     )
     fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
-    # --- FIM DA ALTERAÇÃO ---
 
-    # --- INÍCIO DA ALTERAÇÃO (Eixo Y 0-50%) ---
+    # --- Controle Dinâmico do Eixo Y (0 a 50%) ---
     try:
         all_umidade_data = pd.concat([
             df_plot_15min['umidade_1m_perc'],
@@ -374,6 +391,7 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
         else:
             data_min = all_umidade_data.min()
             data_max = all_umidade_data.max()
+            # Garante que o gráfico mostre pelo menos de 0 a 50, ou expanda se necessário
             final_min = min(0, data_min - 5)
             final_max = max(50, data_max + 5)
 
@@ -381,17 +399,17 @@ def update_specific_dashboard(pathname, dados_json, status_json, selected_hours)
     except Exception as e:
         print(f"Erro ao definir range Y da umidade: {e}")
         pass
-    # --- FIM DA ALTERAÇÃO ---
 
     layout_graficos = [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
-                className="mb-4"), ]
+                className="mb-4"),
+    ]
+
     return layout_cards, layout_graficos, id_ponto
-    # --- Fim da Lógica Central ---
 
 
-# --- Callbacks de Logs (Mantidos) ---
+# --- Callbacks de Logs ---
 
 @app.callback(
     Output('modal-logs', 'is_open'),
@@ -427,10 +445,11 @@ def load_logs_content(is_open, id_ponto, logs_json):
             logs_list = logs_json
         else:
             logs_list = json.loads(logs_json)
+
         logs_list = [log.strip() for log in logs_list if log.strip()]
         if not logs_list: return "Nenhum evento registrado.", []
-        logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
 
+        logs_ponto_ou_geral = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
         logs_filtrados_raw = [
             log for log in logs_ponto_ou_geral
             if "API: Sucesso" not in log and "Processo Worker (Thread) iniciado" not in log
@@ -438,6 +457,7 @@ def load_logs_content(is_open, id_ponto, logs_json):
 
         if not logs_filtrados_raw:
             return f"Nenhum evento crítico ou mudança de status registrada para o ponto {id_ponto}.", []
+
         logs_formatados_display = []
         for log_str in reversed(logs_filtrados_raw):
             parts = log_str.split('|')
@@ -451,8 +471,9 @@ def load_logs_content(is_open, id_ponto, logs_json):
                 dt_utc = pd.to_datetime(timestamp_str_utc_iso).tz_localize('UTC')
                 dt_local = dt_utc.tz_convert('America/Sao_Paulo')
                 timestamp_formatado = dt_local.strftime('%d/%m/%Y %H:%M:%S')
-            except Exception as e:
+            except Exception:
                 timestamp_formatado = timestamp_str_utc_iso.split('+')[0].replace('T', ' ')
+
             cor = "black"
             if "ERRO" in msg_str:
                 cor = "red"
@@ -460,10 +481,12 @@ def load_logs_content(is_open, id_ponto, logs_json):
                 cor = "#E69B00"
             elif "MUDANÇA" in msg_str:
                 cor = "blue"
+
             logs_formatados_display.append(html.P([
                 html.Strong(f"{timestamp_formatado} [{ponto_str}]: ", style={'color': cor}),
                 html.Span(msg_str, style={'color': cor})
             ], className="mb-1"))
+
         logs_div = html.Div(logs_formatados_display, style={'maxHeight': '400px', 'overflowY': 'auto'})
         return logs_div, logs_filtrados_raw
     except Exception as e:
@@ -482,40 +505,34 @@ def load_logs_content(is_open, id_ponto, logs_json):
     prevent_initial_call=True
 )
 def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
-    # (Esta função não foi alterada)
     if n_clicks is None or not id_ponto or not logs_filtrados:
         return dash.no_update
     try:
         config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
         pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
         nome_arquivo = f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
-        print(f"LOG PDF: PDF de logs gerado com sucesso. Arquivo: {nome_arquivo}")
         pdf_output = io.BytesIO(pdf_buffer)
         return dcc.send_bytes(pdf_output.read(), nome_arquivo, type="application/pdf")
-    except Exception as e:
-        print(f"ERRO CRÍTICO no Callback PDF de Logs:")
+    except Exception:
         traceback.print_exc()
         return dash.no_update
 
 
-# --- Callbacks de Download (Mantidos) ---
+# --- Callbacks de Download (PDF e Excel) ---
+
 @app.callback(
     [Output('pdf-task-id-store', 'data'),
      Output('pdf-check-interval', 'disabled'),
      Output('alert-pdf-error', 'is_open', allow_duplicate=True),
      Output('alert-pdf-generic-error', 'is_open', allow_duplicate=True),
-
      Output('report-status-indicator', 'children'),
      Output('btn-pdf-especifico', 'disabled'),
      Output('btn-excel-especifico', 'disabled')],
-
     Input('btn-pdf-especifico', 'n_clicks'),
-    [
-        State('pdf-date-picker', 'start_date'),
-        State('pdf-date-picker', 'end_date'),
-        State('store-id-ponto-ativo', 'data'),
-        State('store-ultimo-status', 'data')
-    ],
+    [State('pdf-date-picker', 'start_date'),
+     State('pdf-date-picker', 'end_date'),
+     State('store-id-ponto-ativo', 'data'),
+     State('store-ultimo-status', 'data')],
     prevent_initial_call=True
 )
 def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json):
@@ -523,21 +540,16 @@ def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
     try:
         task_id = str(uuid.uuid4())
-        print(f"[Trigger PDF] Iniciando tarefa: {task_id}")
         thread = Thread(
             target=gerador_pdf.thread_gerar_pdf,
             args=(task_id, start_date, end_date, id_ponto, status_json)
         )
         thread.start()
-        status_indicator = html.Div([
-            html.Span(dbc.Spinner(size="sm"), className="me-2"),
-            "Gerando PDF, por favor aguarde..."
-        ])
+        status_indicator = html.Div([html.Span(dbc.Spinner(size="sm"), className="me-2"), "Gerando PDF..."])
         return task_id, False, False, False, status_indicator, True, True
-    except Exception as e:
-        print(f"ERRO CRÍTICO ao INICIAR a thread de PDF: {e}")
+    except Exception:
         traceback.print_exc()
-        return dash.no_update, True, False, True, "Erro ao iniciar a geração.", False, False
+        return dash.no_update, True, False, True, "Erro ao iniciar.", False, False
 
 
 @app.callback(
@@ -545,45 +557,35 @@ def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto, status_json
      Output('pdf-check-interval', 'disabled', allow_duplicate=True),
      Output('alert-pdf-error', 'is_open', allow_duplicate=True),
      Output('alert-pdf-generic-error', 'is_open', allow_duplicate=True),
-
      Output('report-status-indicator', 'children', allow_duplicate=True),
      Output('btn-pdf-especifico', 'disabled', allow_duplicate=True),
      Output('btn-excel-especifico', 'disabled', allow_duplicate=True)],
-
     Input('pdf-check-interval', 'n_intervals'),
     State('pdf-task-id-store', 'data'),
     prevent_initial_call=True
 )
 def check_pdf_status(n, task_id):
-    if not task_id:
-        return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
+    if not task_id: return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
     with PDF_CACHE_LOCK:
         task = PDF_CACHE.get(task_id)
     if task:
         try:
             if task["status"] == "concluido":
-                print(f"[Check PDF] Tarefa {task_id} concluída. Enviando download.")
                 pdf_output = io.BytesIO(task["data"])
                 with PDF_CACHE_LOCK:
                     del PDF_CACHE[task_id]
                 return dcc.send_bytes(pdf_output.read(), task["filename"],
                                       type="application/pdf"), True, False, False, None, False, False
             elif task["status"] == "erro":
-                print(f"[Check PDF] Tarefa {task_id} falhou: {task['message']}")
                 with PDF_CACHE_LOCK:
                     del PDF_CACHE[task_id]
-                if "Sem dados" in task["message"]:
-                    return dash.no_update, True, True, False, None, False, False
-                else:
-                    return dash.no_update, True, False, True, None, False, False
-        except Exception as e:
+                is_no_data = "Sem dados" in task["message"]
+                return dash.no_update, True, is_no_data, not is_no_data, None, False, False
+        except Exception:
             with PDF_CACHE_LOCK:
-                if task_id in PDF_CACHE:
-                    del PDF_CACHE[task_id]
-            print(f"ERRO CRÍTICO ao processar o cache do PDF: {e}")
+                if task_id in PDF_CACHE: del PDF_CACHE[task_id]
             traceback.print_exc()
             return dash.no_update, True, False, True, None, False, False
-    print(f"[Check PDF] Tarefa {task_id} ainda em andamento...")
     return dash.no_update, False, False, False, dash.no_update, dash.no_update, dash.no_update
 
 
@@ -592,17 +594,13 @@ def check_pdf_status(n, task_id):
      Output('excel-check-interval', 'disabled'),
      Output('alert-pdf-error', 'is_open', allow_duplicate=True),
      Output('alert-pdf-generic-error', 'is_open', allow_duplicate=True),
-
      Output('report-status-indicator', 'children', allow_duplicate=True),
      Output('btn-pdf-especifico', 'disabled', allow_duplicate=True),
      Output('btn-excel-especifico', 'disabled', allow_duplicate=True)],
-
     Input('btn-excel-especifico', 'n_clicks'),
-    [
-        State('pdf-date-picker', 'start_date'),
-        State('pdf-date-picker', 'end_date'),
-        State('store-id-ponto-ativo', 'data')
-    ],
+    [State('pdf-date-picker', 'start_date'),
+     State('pdf-date-picker', 'end_date'),
+     State('store-id-ponto-ativo', 'data')],
     prevent_initial_call=True
 )
 def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
@@ -610,21 +608,16 @@ def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
         return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
     try:
         task_id = str(uuid.uuid4())
-        print(f"[Trigger Excel] Iniciando tarefa: {task_id}")
         thread = Thread(
             target=gerador_pdf.thread_gerar_excel,
             args=(task_id, start_date, end_date, id_ponto)
         )
         thread.start()
-        status_indicator = html.Div([
-            html.Span(dbc.Spinner(size="sm"), className="me-2"),
-            "Gerando Excel, por favor aguarde..."
-        ])
+        status_indicator = html.Div([html.Span(dbc.Spinner(size="sm"), className="me-2"), "Gerando Excel..."])
         return task_id, False, False, False, status_indicator, True, True
-    except Exception as e:
-        print(f"ERRO CRÍTICO ao INICIAR a thread de Excel: {e}")
+    except Exception:
         traceback.print_exc()
-        return dash.no_update, True, False, True, "Erro ao iniciar a geração.", False, False
+        return dash.no_update, True, False, True, "Erro ao iniciar.", False, False
 
 
 @app.callback(
@@ -632,50 +625,37 @@ def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
      Output('excel-check-interval', 'disabled', allow_duplicate=True),
      Output('alert-pdf-error', 'is_open', allow_duplicate=True),
      Output('alert-pdf-generic-error', 'is_open', allow_duplicate=True),
-
      Output('report-status-indicator', 'children', allow_duplicate=True),
      Output('btn-pdf-especifico', 'disabled', allow_duplicate=True),
      Output('btn-excel-especifico', 'disabled', allow_duplicate=True)],
-
     Input('excel-check-interval', 'n_intervals'),
     State('excel-task-id-store', 'data'),
     prevent_initial_call=True
 )
 def check_excel_status(n, task_id):
-    if not task_id:
-        return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
+    if not task_id: return dash.no_update, True, False, False, dash.no_update, dash.no_update, dash.no_update
     with EXCEL_CACHE_LOCK:
         task = EXCEL_CACHE.get(task_id)
     if task:
         try:
             if task["status"] == "concluido":
-                print(f"[Check Excel] Tarefa {task_id} concluída. Enviando download.")
                 with EXCEL_CACHE_LOCK:
                     del EXCEL_CACHE[task_id]
                 return dcc.send_bytes(task["data"], task["filename"],
                                       type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), True, False, False, None, False, False
             elif task["status"] == "erro":
-                print(f"[Check Excel] Tarefa {task_id} falhou: {task['message']}")
                 with EXCEL_CACHE_LOCK:
                     del EXCEL_CACHE[task_id]
-                if "Sem dados" in task["message"]:
-                    return dash.no_update, True, True, False, None, False, False
-                else:
-                    return dash.no_update, True, False, True, None, False, False
-        except Exception as e:
+                is_no_data = "Sem dados" in task["message"]
+                return dash.no_update, True, is_no_data, not is_no_data, None, False, False
+        except Exception:
             with EXCEL_CACHE_LOCK:
-                if task_id in EXCEL_CACHE:
-                    del EXCEL_CACHE[task_id]
-            print(f"ERRO CRÍTICO ao processar o cache do Excel: {e}")
+                if task_id in EXCEL_CACHE: del EXCEL_CACHE[task_id]
             return dash.no_update, True, False, True, None, False, False
-    print(f"[Check Excel] Tarefa {task_id} ainda em andamento...")
     return dash.no_update, False, False, False, dash.no_update, dash.no_update, dash.no_update
 
 
-# --- FIM: NOVOS CALLBACKS DE DOWNLOAD (EXCEL) ---
-
-
-# --- INÍCIO: NOVO CALLBACK PARA ACUMULADO DINÂMICO ---
+# --- Novo Callback: Acumulado Dinâmico ---
 @app.callback(
     Output('dynamic-accumulated-output', 'children'),
     [Input('graph-time-selector', 'value'),
@@ -683,46 +663,24 @@ def check_excel_status(n, task_id):
      Input('url-raiz', 'pathname')]
 )
 def update_dynamic_accumulated_text(selected_hours, dados_json, pathname):
-    # 1. Condições de saída
-    # Se for 72h (o padrão) ou se não tiver dados, não mostra nada.
     if selected_hours == 72 or not dados_json or not pathname.startswith('/ponto/'):
-        return None  # Retorna vazio
-
+        return None
     try:
-        # 2. Pegar o ID do ponto
         id_ponto = pathname.split('/')[-1]
-
-        # 3. Carregar e filtrar os dados (igual ao outro callback)
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
+        if df_ponto.empty: return None
 
-        if df_ponto.empty:
-            return None
-
-        # 4. Calcular o acumulado para o período selecionado
-        # (Garante a tipagem antes de calcular)
         df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
         df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
 
         df_acumulado = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
+        if df_acumulado.empty: return None
 
-        if df_acumulado.empty:
-            return None
-
-        # 5. Pegar o último valor
         valor_acumulado = df_acumulado.iloc[-1]['chuva_mm']
+        if pd.isna(valor_acumulado): return None
 
-        if pd.isna(valor_acumulado):
-            return None
-
-        # 6. Formatar e retornar o componente
-        texto_formatado = f"Acumulado ({selected_hours}h): {valor_acumulado:.1f} mm"
-
-        # Retorna o texto com o estilo que o usuário pediu (pequeno, da cor do dropdown)
-        return html.P(texto_formatado, className="mb-0 ms-3",
+        return html.P(f"Acumulado ({selected_hours}h): {valor_acumulado:.1f} mm", className="mb-0 ms-3",
                       style={'fontSize': '0.85rem', 'fontWeight': 'bold', 'color': '#555'})
-
-    except Exception as e:
-        print(f"Erro ao calcular acumulado dinâmico: {e}")
+    except Exception:
         return None
-# --- FIM DO NOVO CALLBACK ---
