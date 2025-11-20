@@ -110,8 +110,8 @@ def worker_main_loop():
         except Exception as e:
             data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO (Incremental Zentra): {e}")
 
-        # 3. MERGE E FILTRAGEM
-        print("[WORKER LOG] Passo 3: Unindo e filtrando dados coletados...")
+        # 3. MERGE E FILTRAGEM PARA SALVAR NO DB
+        print("[WORKER LOG] Passo 3: Unindo e filtrando dados coletados para salvar no DB...")
         df_para_salvar = pd.merge(novos_dados_chuva_df, df_umidade_incremental, on=['timestamp', 'id_ponto'], how='outer')
         print(f"[WORKER LOG] ...total de {len(df_para_salvar)} registros após o merge.")
 
@@ -126,20 +126,93 @@ def worker_main_loop():
         # 4. SALVAR E PREPARAR DADOS PARA CÁLCULO
         print("[WORKER LOG] Passo 4: Salvando dados novos e preparando para cálculo...")
         if not df_para_salvar.empty:
-            df_merged = df_para_salvar.groupby(['timestamp', 'id_ponto'], as_index=False).first()
-            data_source.save_to_sqlite(df_merged) # A função save_to_sqlite agora terá seu próprio log
-            historico_para_calculo = pd.concat([historico_recente_df, df_merged], ignore_index=True)
+            df_merged_to_save = df_para_salvar.groupby(['timestamp', 'id_ponto'], as_index=False).first()
+            data_source.save_to_sqlite(df_merged_to_save) # A função save_to_sqlite agora terá seu próprio log
         else:
             print("[WORKER LOG] ...nenhum dado novo para salvar.")
-            historico_para_calculo = historico_recente_df
+
+        # --- INÍCIO DA CORREÇÃO: Criar historico_para_calculo com todos os dados mais recentes ---
+        # Concatena os dados históricos com os novos dados da API (mesmo que duplicados)
+        # e depois remove duplicatas, mantendo o mais recente.
+        historico_para_calculo = pd.concat([historico_recente_df, novos_dados_chuva_df, df_umidade_incremental], ignore_index=True)
+        historico_para_calculo['timestamp'] = pd.to_datetime(historico_para_calculo['timestamp'], utc=True)
+        historico_para_calculo = historico_para_calculo.sort_values('timestamp').drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last').reset_index(drop=True)
+        # --- FIM DA CORREÇÃO ---
+
+        # --- INÍCIO DA ALTERAÇÃO: Lógica de Backfill Inteligente (Granular) ---
+        print("[WORKER LOG] Passo 4.5: Verificando e executando backfills inteligentes...")
+        for id_ponto_analise in PONTOS_DE_ANALISE.keys():
+            agora_utc = datetime.datetime.now(datetime.timezone.utc)
+            limite_lacuna = agora_utc - datetime.timedelta(minutes=FREQUENCIA_API_SEGUNDOS / 60 + 5) # 15 min + 5 min de margem
+
+            if id_ponto_analise == ID_PONTO_ZENTRA_KM72:
+                # Lógica específica para Zentra (umidade) e WeatherLink (chuva)
+                # 1. Verificar lacuna para dados de UMIDADE (Zentra)
+                df_ponto_umidade = historico_para_calculo[
+                    (historico_para_calculo['id_ponto'] == id_ponto_analise) &
+                    (historico_para_calculo['umidade_1m_perc'].notna() |
+                     historico_para_calculo['umidade_2m_perc'].notna() |
+                     historico_para_calculo['umidade_3m_perc'].notna())
+                ]
+                ultimo_timestamp_umidade = df_ponto_umidade['timestamp'].max() if not df_ponto_umidade.empty else None
+
+                if ultimo_timestamp_umidade is None or ultimo_timestamp_umidade < limite_lacuna:
+                    print(f"[WORKER LOG] ...Lacuna de UMIDADE detectada para {id_ponto_analise}. Último DB Umidade: {ultimo_timestamp_umidade}. Limite: {limite_lacuna}.")
+                    backfill_sucesso = data_source.backfill_zentra_km72_data()
+                    if backfill_sucesso:
+                        print(f"[WORKER LOG] ...Backfill de UMIDADE para {id_ponto_analise} executado com sucesso.")
+                        historico_para_calculo = data_source.get_recent_data_for_worker(hours=100) # Recarrega
+                    else:
+                        print(f"[WORKER LOG] ...Backfill de UMIDADE para {id_ponto_analise} pausado.")
+                else:
+                    print(f"[WORKER LOG] ...Nenhuma lacuna significativa de UMIDADE para {id_ponto_analise}. Último DB Umidade: {ultimo_timestamp_umidade}.")
+
+                # 2. Verificar lacuna para dados de CHUVA (WeatherLink)
+                df_ponto_chuva = historico_para_calculo[
+                    (historico_para_calculo['id_ponto'] == id_ponto_analise) &
+                    (historico_para_calculo['chuva_mm'].notna())
+                ]
+                ultimo_timestamp_chuva = df_ponto_chuva['timestamp'].max() if not df_ponto_chuva.empty else None
+
+                if ultimo_timestamp_chuva is None or ultimo_timestamp_chuva < limite_lacuna:
+                    print(f"[WORKER LOG] ...Lacuna de CHUVA detectada para {id_ponto_analise}. Último DB Chuva: {ultimo_timestamp_chuva}. Limite: {limite_lacuna}.")
+                    backfill_sucesso = data_source.backfill_weatherlink_data(id_ponto_analise)
+                    if backfill_sucesso:
+                        print(f"[WORKER LOG] ...Backfill de CHUVA para {id_ponto_analise} executado com sucesso.")
+                        historico_para_calculo = data_source.get_recent_data_for_worker(hours=100) # Recarrega
+                    else:
+                        print(f"[WORKER LOG] ...Backfill de CHUVA para {id_ponto_analise} pausado.")
+                else:
+                    print(f"[WORKER LOG] ...Nenhuma lacuna significativa de CHUVA para {id_ponto_analise}. Último DB Chuva: {ultimo_timestamp_chuva}.")
+
+            else:
+                # Lógica existente para outros pontos (apenas chuva da WeatherLink)
+                df_ponto_historico = historico_para_calculo[historico_para_calculo['id_ponto'] == id_ponto_analise]
+                ultimo_timestamp_db = df_ponto_historico['timestamp'].max() if not df_ponto_historico.empty else None
+
+                if ultimo_timestamp_db is None or ultimo_timestamp_db < limite_lacuna:
+                    print(f"[WORKER LOG] ...Lacuna detectada para {id_ponto_analise}. Último DB: {ultimo_timestamp_db}. Limite: {limite_lacuna}.")
+                    backfill_sucesso = data_source.backfill_weatherlink_data(id_ponto_analise)
+                    if backfill_sucesso:
+                        print(f"[WORKER LOG] ...Backfill para {id_ponto_analise} executado com sucesso (parcial ou total).")
+                        historico_para_calculo = data_source.get_recent_data_for_worker(hours=100)
+                    else:
+                        print(f"[WORKER LOG] ...Backfill para {id_ponto_analise} pausado (limite de tempo atingido ou erro). Continuará no próximo ciclo.")
+                else:
+                    print(f"[WORKER LOG] ...Nenhuma lacuna significativa para {id_ponto_analise}. Último DB: {ultimo_timestamp_db}.")
+        # --- FIM DA ALTERAÇÃO: Lógica de Backfill Inteligente (Granular) ---
+
 
         # 5. CALCULAR STATUS
         print("[WORKER LOG] Passo 5: Calculando status para cada ponto...")
         status_atualizado = {}
         if not historico_para_calculo.empty:
+            # A linha abaixo já foi feita na correção acima, mas mantemos a ordenação e deduplicação
+            # para garantir que o DataFrame esteja sempre limpo antes do loop de cálculo.
             historico_para_calculo = historico_para_calculo.sort_values('timestamp').drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last').reset_index(drop=True)
 
             for id_ponto in PONTOS_DE_ANALISE.keys():
+                # CORREÇÃO: Usar historico_para_calculo para filtrar
                 df_ponto = historico_para_calculo[historico_para_calculo['id_ponto'] == id_ponto].copy()
                 
                 ponto_info = {"status": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None, "umidade_2m": None, "umidade_3m": None, "timestamp_local": None}
@@ -206,16 +279,16 @@ def background_task_wrapper():
     print(f"[Worker Inicial] Atrasando início para liberar o Dash ({RENDER_SLEEP_TIME_SEC}s)...")
     time.sleep(RENDER_SLEEP_TIME_SEC)
 
-    if data_source.read_data_from_sqlite().empty:
-        print("[Worker Inicial] DB vazio. Executando backfill inicial.")
-        # Lógica de backfill...
+    # --- INÍCIO DA ALTERAÇÃO: Remove a condição de DB vazio para backfill ---
+    # A lógica de backfill inteligente será executada dentro do worker_main_loop
+    # --- FIM DA ALTERAÇÃO ---
 
     INTERVALO_EM_MINUTOS = 15
     CARENCIA_EM_SEGUNDOS = 60
     while True:
         if not worker_main_loop():
             print(f"WORKER (Thread): Reiniciando ciclo após erro/pausa. Dormindo por {RENDER_SLEEP_TIME_SEC}s.")
-            time.sleep(RENDER_SLEEP_TIME_SEC)
+            time.sleep(RENDER_SLEEP_SEC)
             continue
 
         agora = datetime.datetime.now(datetime.timezone.utc)
