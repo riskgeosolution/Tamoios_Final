@@ -44,13 +44,11 @@ def worker_verificar_alertas(status_novos, status_antigos):
         status_novo_info = status_novos.get(id_ponto, {"status": "SEM DADOS"})
         status_antigo_info = status_antigos.get(id_ponto)
 
-        # --- INÍCIO DA CORREÇÃO: Lida com a migração do formato antigo (string) para o novo (dict) ---
         status_antigo_str = "INDEFINIDO"
         if isinstance(status_antigo_info, dict):
             status_antigo_str = status_antigo_info.get('status', "INDEFINIDO")
         elif isinstance(status_antigo_info, str):
-            status_antigo_str = status_antigo_info # Formato antigo
-        # --- FIM DA CORREÇÃO ---
+            status_antigo_str = status_antigo_info
 
         status_novo_str = status_novo_info.get('status', "SEM DADOS")
 
@@ -70,27 +68,31 @@ def worker_verificar_alertas(status_novos, status_antigos):
 
 def worker_main_loop():
     inicio_ciclo = time.time()
-    trigger_backfill = False
-
+    
     try:
-        print("\n--- 💾 Últimos Registros no DB (Antes da API) ---")
-        print(data_source.get_last_n_entries(n=4).to_string())
-        print("--------------------------------------------------\n")
+        print("\n" + "="*80)
+        print(f"WORKER (Thread): Início do ciclo em {datetime.datetime.now(datetime.timezone.utc).isoformat()}")
+        print("="*80)
 
-        print(f"WORKER (Thread): Início do ciclo.")
+        # 1. BUSCAR DADOS
+        print("[WORKER LOG] Passo 1: Buscando dados recentes do DB e status do disco...")
         historico_recente_df = data_source.get_recent_data_for_worker(hours=100)
         status_antigos_do_disco = data_source.get_status_from_disk()
+        print(f"[WORKER LOG] ...encontrados {len(historico_recente_df)} registros no histórico recente.")
 
         numeric_cols_history = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         for col in numeric_cols_history:
             if col in historico_recente_df.columns:
                 historico_recente_df.loc[:, col] = pd.to_numeric(historico_recente_df[col], errors='coerce')
 
+        # 2. COLETAR DADOS DAS APIS
+        print("[WORKER LOG] Passo 2: Coletando dados das APIs externas...")
         novos_dados_chuva_df = pd.DataFrame()
         df_umidade_incremental = pd.DataFrame()
 
         try:
             novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
+            print(f"[WORKER LOG] ...API WeatherLink retornou {len(novos_dados_chuva_df)} registros.")
         except Exception as e:
             data_source.adicionar_log("GERAL", f"ERRO FATAL (WeatherLink Fetch): {e}")
             traceback.print_exc()
@@ -102,30 +104,37 @@ def worker_main_loop():
                 linha_umidade = {"timestamp": ts_arredondado, "id_ponto": ID_PONTO_ZENTRA_KM72, **dados_umidade_dict}
                 df_umidade_incremental = pd.DataFrame([linha_umidade])
                 df_umidade_incremental['timestamp'] = pd.to_datetime(df_umidade_incremental['timestamp'], utc=True)
+                print(f"[WORKER LOG] ...API Zentra retornou {len(df_umidade_incremental)} registro.")
+            else:
+                print("[WORKER LOG] ...API Zentra não retornou dados novos.")
         except Exception as e:
             data_source.adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO (Incremental Zentra): {e}")
 
+        # 3. MERGE E FILTRAGEM
+        print("[WORKER LOG] Passo 3: Unindo e filtrando dados coletados...")
         df_para_salvar = pd.merge(novos_dados_chuva_df, df_umidade_incremental, on=['timestamp', 'id_ponto'], how='outer')
+        print(f"[WORKER LOG] ...total de {len(df_para_salvar)} registros após o merge.")
 
-        # --- INÍCIO DA CORREÇÃO: Filtra dados que já existem no DB ---
         if not df_para_salvar.empty and not historico_recente_df.empty:
-            # Cria uma chave única para cada linha (timestamp + id_ponto)
             key_cols = ['timestamp', 'id_ponto']
-            df_para_salvar = df_para_salvar.set_index(key_cols)
-            historico_recente_df = historico_recente_df.set_index(key_cols)
+            df_para_salvar_indexed = df_para_salvar.set_index(key_cols)
+            historico_recente_indexed = historico_recente_df.set_index(key_cols)
             
-            # Mantém apenas as linhas do novo DF cujo índice não existe no DF histórico
-            df_para_salvar = df_para_salvar[~df_para_salvar.index.isin(historico_recente_df.index)].reset_index()
-        # --- FIM DA CORREÇÃO ---
+            df_para_salvar = df_para_salvar_indexed[~df_para_salvar_indexed.index.isin(historico_recente_indexed.index)].reset_index()
+            print(f"[WORKER LOG] ...{len(df_para_salvar)} registros restantes após filtrar duplicatas do DB.")
 
+        # 4. SALVAR E PREPARAR DADOS PARA CÁLCULO
+        print("[WORKER LOG] Passo 4: Salvando dados novos e preparando para cálculo...")
         if not df_para_salvar.empty:
             df_merged = df_para_salvar.groupby(['timestamp', 'id_ponto'], as_index=False).first()
-            data_source.save_to_sqlite(df_merged)
-            historico_para_calculo = pd.concat([historico_recente_df.reset_index(), df_merged], ignore_index=True)
+            data_source.save_to_sqlite(df_merged) # A função save_to_sqlite agora terá seu próprio log
+            historico_para_calculo = pd.concat([historico_recente_df, df_merged], ignore_index=True)
         else:
-            historico_para_calculo = historico_recente_df.reset_index() if isinstance(historico_recente_df.index, pd.MultiIndex) else historico_recente_df
+            print("[WORKER LOG] ...nenhum dado novo para salvar.")
+            historico_para_calculo = historico_recente_df
 
-
+        # 5. CALCULAR STATUS
+        print("[WORKER LOG] Passo 5: Calculando status para cada ponto...")
         status_atualizado = {}
         if not historico_para_calculo.empty:
             historico_para_calculo = historico_para_calculo.sort_values('timestamp').drop_duplicates(subset=['id_ponto', 'timestamp'], keep='last').reset_index(drop=True)
@@ -163,16 +172,21 @@ def worker_main_loop():
                 status_atualizado[id_ponto] = ponto_info
         else:
             status_atualizado = {p: {"status": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None, "umidade_2m": None, "umidade_3m": None, "timestamp_local": None} for p in PONTOS_DE_ANALISE.keys()}
+        
+        print("[WORKER LOG] ...cálculo de status concluído. Status finais:")
+        for id_p, info in status_atualizado.items():
+            print(f"  - {id_p}: {info.get('status')}, Chuva 72h: {info.get('chuva_72h')}mm")
 
+        # 6. VERIFICAR ALERTAS E SALVAR STATUS
+        print("[WORKER LOG] Passo 6: Verificando alertas e salvando status final no disco...")
         status_final_completo = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
         
-        # --- INÍCIO DA ALTERAÇÃO: Usa a função de escrita segura com timeout ---
         data_source.write_with_timeout(
             data_source.STATUS_FILE,
             status_final_completo,
-            timeout=20  # Timeout de 20 segundos para a escrita do arquivo de status
+            timeout=20
         )
-        # --- FIM DA ALTERAÇÃO ---
+        print(f"[WORKER LOG] ...arquivo '{os.path.basename(data_source.STATUS_FILE)}' salvo com sucesso.")
 
         print(f"WORKER (Thread): Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
         return True

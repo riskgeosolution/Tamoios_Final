@@ -172,6 +172,11 @@ def save_to_sqlite(df_novos_dados):
 
         colunas_para_salvar = [col for col in COLUNAS_HISTORICO if col in df_para_salvar.columns]
         df_para_salvar = df_para_salvar[colunas_para_salvar]
+        
+        # --- INÍCIO DA ALTERAÇÃO: Adiciona log ---
+        print(f"[WORKER LOG] ...salvando {len(df_para_salvar)} linhas no banco de dados.")
+        # --- FIM DA ALTERAÇÃO ---
+        
         df_para_salvar.to_sql(DB_TABLE_NAME, DB_ENGINE, if_exists='append', index=False)
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
@@ -281,7 +286,6 @@ def fetch_data_from_weatherlink_api():
     logs, dados = [], []
     t = str(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
 
-    # Adicionado timeout ao client para robustez
     with httpx.Client(timeout=30.0) as client:
         for id_ponto, config in WEATHERLINK_CONFIG.items():
             if "SUA_CHAVE" in config.get('API_KEY', ''):
@@ -290,30 +294,41 @@ def fetch_data_from_weatherlink_api():
 
             print(f"[API] REQUISITANDO {id_ponto} (Station ID: {config['STATION_ID']})")
 
-            params_to_sign = {
-                "api-key": config['API_KEY'],
-                "station-id": str(config['STATION_ID']),
-                "t": t
-            }
+            params_to_sign = {"api-key": config['API_KEY'], "station-id": str(config['STATION_ID']), "t": t}
             signature = calculate_hmac_signature(params_to_sign, config['API_SECRET'])
+            params_to_send = {"api-key": config['API_KEY'], "t": t, "api-signature": signature}
 
-            params_to_send = {
-                "api-key": config['API_KEY'],
-                "t": t,
-                "api-signature": signature
-            }
+            # --- INÍCIO DA CORREÇÃO DE ROBUSTEZ DE REDE ---
+            def do_request():
+                try:
+                    do_request.response = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params_to_send, timeout=25.0)
+                except Exception as e:
+                    do_request.error = e
+            
+            do_request.response = None
+            do_request.error = None
+            
+            request_thread = threading.Thread(target=do_request)
+            request_thread.start()
+            request_thread.join(timeout=30.0) # Timeout geral de 30s
+
+            if request_thread.is_alive():
+                logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API: Timeout de 30s excedido para a estação."})
+                continue # Pula para a próxima estação
+
+            if do_request.error:
+                logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API: {do_request.error}"})
+                continue
+
+            r = do_request.response
+            # --- FIM DA CORREÇÃO DE ROBUSTEZ DE REDE ---
 
             try:
-                # Adicionado timeout explícito por requisição
-                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params_to_send, timeout=30.0)
                 r.raise_for_status()
+                response_json = r.json()
+                print(f"WeatherLink API Response for {id_ponto}: Status 200, JSON: {response_json}")
 
-                print(f"WeatherLink API Response for {id_ponto}: Status 200, JSON: {r.json()}")
-
-                s = next((
-                    s['data'][0] for s in r.json().get('sensors', [])
-                    if (s.get('data_structure_type') == 10 or s.get('sensor_type') == 48) and s.get('data')
-                ), None)
+                s = next((s['data'][0] for s in response_json.get('sensors', []) if (s.get('data_structure_type') == 10 or s.get('sensor_type') == 48) and s.get('data')), None)
 
                 if not s or 'ts' not in s or (int(t) - s['ts']) > 3600:
                     logs.append({'id_ponto': id_ponto, 'mensagem': 'AVISO API: Estação offline ou dados atrasados.'})
@@ -330,7 +345,7 @@ def fetch_data_from_weatherlink_api():
                 })
                 logs.append({'id_ponto': id_ponto, 'mensagem': f"API: Sucesso. Chuva: {chuva_15:.2f}mm"})
             except Exception as e:
-                logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API: {e}"})
+                logs.append({'id_ponto': id_ponto, 'mensagem': f"ERRO API (Processamento): {e}"})
 
     df = pd.DataFrame(dados)
     if not df.empty and 'timestamp' in df.columns:
