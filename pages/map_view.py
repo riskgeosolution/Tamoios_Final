@@ -58,6 +58,10 @@ def update_map_pins(status_json):
     pinos_do_mapa = []
     for id_ponto, config in PONTOS_DE_ANALISE.items():
         status_info = status_json.get(id_ponto, {})
+        # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
+        if not isinstance(status_info, dict):
+            status_info = {}
+        # --- FIM DA CORREÇÃO ---
         chuva_72h_pino = status_info.get('chuva_72h', 0.0)
         
         pino = dl.Marker(
@@ -78,6 +82,11 @@ def create_km_block(id_ponto, config, status_info):
     """
     Cria o bloco de resumo do KM para os cards laterais, usando apenas o dict de status.
     """
+    # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
+    if not isinstance(status_info, dict):
+        status_info = {}
+    # --- FIM DA CORREÇÃO ---
+    
     status_ponto_txt = status_info.get('status', 'SEM DADOS')
     ultima_chuva_72h = status_info.get('chuva_72h', 0.0)
     umidade_1m = status_info.get('umidade_1m')
@@ -154,6 +163,10 @@ def update_summary_left(status_json):
         if id_ponto in PONTOS_DE_ANALISE:
             config = PONTOS_DE_ANALISE[id_ponto]
             status_info = status_json.get(id_ponto, {})
+            # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
+            if not isinstance(status_info, dict):
+                status_info = {}
+            # --- FIM DA CORREÇÃO ---
             km_block = create_km_block(id_ponto, config, status_info)
             left_blocks.append(km_block)
     return left_blocks if left_blocks else dbc.Alert("Dados indisponíveis (L).", color="warning", className="m-2 small")
@@ -172,6 +185,10 @@ def update_summary_right(status_json):
         if id_ponto in PONTOS_DE_ANALISE:
             config = PONTOS_DE_ANALISE[id_ponto]
             status_info = status_json.get(id_ponto, {})
+            # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
+            if not isinstance(status_info, dict):
+                status_info = {}
+            # --- FIM DA CORREÇÃO ---
             km_block = create_km_block(id_ponto, config, status_info)
             right_blocks.append(km_block)
     return right_blocks if right_blocks else dbc.Alert("Dados indisponíveis (R).", color="warning", className="m-2 small")

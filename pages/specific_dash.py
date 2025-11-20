@@ -126,6 +126,11 @@ def update_specific_cards(pathname, status_json):
         return dbc.Alert("Ponto não encontrado.", color="danger")
 
     status_info = status_json.get(id_ponto, {})
+    # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
+    if not isinstance(status_info, dict):
+        status_info = {}
+    # --- FIM DA CORREÇÃO ---
+    
     status_geral_ponto_txt = status_info.get('status', 'INDEFINIDO')
     ultima_chuva_72h = status_info.get('chuva_72h', 0.0)
     umidade_1m = status_info.get('umidade_1m')
