@@ -109,7 +109,7 @@ def setup_disk_paths():
     """
     Define os caminhos de disco e, o mais importante, inicializa o DB_ENGINE global.
     """
-    print("--- data_source.py (v12.18 - Engine Global Otimizado) ---")
+    # print("--- data_source.py (v12.18 - Engine Global Otimizado) ---") # Removido para evitar duplicação
     global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING, DB_ENGINE
 
     DB_FILENAME = "temp_local_db.db"
@@ -236,12 +236,14 @@ def get_all_data_for_dashboard():
 
 
 def get_status_from_disk():
+    # --- INÍCIO DA CORREÇÃO: Garante que os caminhos de disco estão configurados ---
+    setup_disk_paths()
+    # --- FIM DA CORREÇÃO ---
+    
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
             status_data = json.load(f)
-            # --- INÍCIO DA ALTERAÇÃO: Adiciona log ---
             print(f"[WORKER LOG] get_status_from_disk: Retornando status do disco: {status_data}")
-            # --- FIM DA ALTERAÇÃO ---
             return status_data
     except (FileNotFoundError, json.JSONDecodeError) as e:
         default_status = {p: {"status": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None, "umidade_2m": None, "umidade_3m": None, "timestamp_local": None} for p in PONTOS_DE_ANALISE.keys()}
@@ -560,3 +562,7 @@ def backfill_weatherlink_data(id_ponto):
         print(f"[API {id_ponto}] ERRO CRÍTICO (Backfill WeatherLink): {e}")
         traceback.print_exc()
         return True
+
+# --- INÍCIO DA CORREÇÃO: Chama setup_disk_paths() na importação do módulo ---
+setup_disk_paths()
+# --- FIM DA CORREÇÃO ---
