@@ -238,9 +238,15 @@ def get_all_data_for_dashboard():
 def get_status_from_disk():
     try:
         with open(STATUS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {p: "INDEFINIDO" for p in PONTOS_DE_ANALISE.keys()}
+            status_data = json.load(f)
+            # --- INÍCIO DA ALTERAÇÃO: Adiciona log ---
+            print(f"[WORKER LOG] get_status_from_disk: Retornando status do disco: {status_data}")
+            # --- FIM DA ALTERAÇÃO ---
+            return status_data
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        default_status = {p: {"status": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None, "umidade_2m": None, "umidade_3m": None, "timestamp_local": None} for p in PONTOS_DE_ANALISE.keys()}
+        print(f"[WORKER LOG] get_status_from_disk: Erro ao ler '{STATUS_FILE}' ({e}). Retornando status padrão: {default_status}")
+        return default_status
 
 
 def get_last_n_entries(n=4):
