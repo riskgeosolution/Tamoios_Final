@@ -22,7 +22,11 @@ def calcular_acumulado_rolling(df_ponto, horas=72):
     if 'chuva_mm' not in df_ponto.columns or df_ponto.empty or 'timestamp' not in df_ponto.columns:
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    df_original = df_ponto.sort_values('timestamp').copy()
+    # --- CORREÇÃO DEFINITIVA: Garantir que os dados estejam ordenados por tempo ---
+    # Esta é a pré-condição mais importante para qualquer cálculo de janela (rolling).
+    df_ponto = df_ponto.sort_values('timestamp')
+    
+    df_original = df_ponto.copy()
 
     try:
         # 1. Garantir que o timestamp é datetime e é o índice

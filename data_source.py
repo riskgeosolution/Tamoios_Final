@@ -1,4 +1,4 @@
-# data_source.py (COMPLETO, v12.18 - Reduzindo Leitura do Dash)
+# data_source.py (CORREÇÃO FINAL E DEFINITIVA)
 
 import pandas as pd
 import json
@@ -13,6 +13,7 @@ import warnings
 import time
 from sqlalchemy import create_engine, inspect, text
 from httpx import HTTPStatusError
+import threading
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -42,14 +43,48 @@ COLUNAS_HISTORICO = [
     'base_1m', 'base_2m', 'base_3m'
 ]
 
+# --- INÍCIO DA NOVA FUNÇÃO DE ESCRITA SEGURA ---
+def write_with_timeout(file_path, content, mode='w', timeout=15):
+    """
+    Escreve conteúdo em um arquivo com um timeout para prevenir bloqueios de I/O.
+    Levanta um TimeoutError se a escrita demorar mais que o timeout especificado.
+    """
+    def target():
+        try:
+            with open(file_path, mode, encoding='utf-8') as f:
+                if isinstance(content, str):
+                    f.write(content)
+                else: # Assume que é um objeto JSON para dar dump
+                    json.dump(content, f, indent=2)
+            target.success = True
+        except Exception as e:
+            target.error = e
+            target.success = False
+
+    target.success = False
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        # A thread ainda está rodando, o que significa que o timeout foi atingido.
+        raise TimeoutError(f"A escrita no arquivo '{os.path.basename(file_path)}' excedeu o timeout de {timeout}s.")
+
+    if not target.success:
+        # A thread terminou, mas falhou.
+        raise target.error
+# --- FIM DA NOVA FUNÇÃO DE ESCRITA SEGURA ---
+
 
 def adicionar_log(id_ponto, mensagem):
+    """ Adiciona uma entrada de log usando o wrapper de escrita segura. """
     try:
         log_entry = f"{datetime.datetime.now(datetime.timezone.utc).isoformat()} | {id_ponto} | {mensagem}\n"
-        with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(log_entry)
+        # Usa o novo wrapper para a escrita, com timeout mais curto para logs.
+        write_with_timeout(LOG_FILE, log_entry, mode='a', timeout=10)
     except Exception as e:
-        print(f"ERRO CRÍTICO ao escrever no log: {e}")
+        # Se até a escrita segura falhar, imprime no console como último recurso.
+        print(f"ERRO CRÍTICO ao escrever no log (após timeout ou falha): {e}")
 
 
 def ler_logs_eventos(id_ponto):
@@ -181,10 +216,10 @@ def get_recent_data_for_worker(hours=73):
 
 
 def get_all_data_for_dashboard():
-    # --- CORREÇÃO CRÍTICA: REDUÇÃO DA JANELA DE LEITURA ---
-    # Reduz de 7 dias para 2 dias para evitar o Gunicorn Timeout (120s) no Render.
-    df_completo = read_data_from_sqlite(last_hours=2 * 24)
-    # --- FIM DA CORREÇÃO ---
+    # --- INÍCIO DA CORREÇÃO DEFINITIVA: Aumentar janela de dados para o dashboard ---
+    # Aumenta a janela para 100 horas para garantir que o cálculo de 72h (e outros) sempre tenha dados suficientes.
+    df_completo = read_data_from_sqlite(last_hours=100)
+    # --- FIM DA CORREÇÃO DEFINITIVA ---
 
     status_atual = get_status_from_disk()
     try:
@@ -246,13 +281,13 @@ def fetch_data_from_weatherlink_api():
     logs, dados = [], []
     t = str(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
 
+    # Adicionado timeout ao client para robustez
     with httpx.Client(timeout=30.0) as client:
         for id_ponto, config in WEATHERLINK_CONFIG.items():
             if "SUA_CHAVE" in config.get('API_KEY', ''):
                 print(f"[API] PULANDO {id_ponto}: Chave não configurada/contém placeholder.")
                 continue
 
-            # Print para confirmar a requisição
             print(f"[API] REQUISITANDO {id_ponto} (Station ID: {config['STATION_ID']})")
 
             params_to_sign = {
@@ -269,12 +304,11 @@ def fetch_data_from_weatherlink_api():
             }
 
             try:
-                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params_to_send)
+                # Adicionado timeout explícito por requisição
+                r = client.get(ENDPOINT.format(station_id=config['STATION_ID']), params=params_to_send, timeout=30.0)
                 r.raise_for_status()
 
-                # --- PRINT DE DEBUG DO JSON ---
                 print(f"WeatherLink API Response for {id_ponto}: Status 200, JSON: {r.json()}")
-                # --- FIM DO PRINT ---
 
                 s = next((
                     s['data'][0] for s in r.json().get('sensors', [])
@@ -302,11 +336,9 @@ def fetch_data_from_weatherlink_api():
     if not df.empty and 'timestamp' in df.columns:
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
 
-    # --- PRINT DE DEBUG CRÍTICO AQUI ---
     print("\n--- DEBUG: DataFrame WeatherLink FINAL antes de salvar ---")
     print(df.to_string())
     print("----------------------------------------------------------\n")
-    # --- FIM DO NOVO PRINT ---
 
     return df, None, logs
 
@@ -317,7 +349,8 @@ def _get_readings_zentra(client, station_serial, start_date, end_date):
               "end": end_date.strftime("%Y-%m-%d")}
     headers = {"Authorization": f"Token {ZENTRA_API_TOKEN}"}
     try:
-        return client.get(url, headers=headers, params=params, timeout=20.0)
+        # Adicionado timeout explícito por requisição
+        return client.get(url, headers=headers, params=params, timeout=30.0)
     except httpx.TimeoutException:
         return None
 
@@ -326,9 +359,7 @@ def fetch_data_from_zentra_cloud():
     end_date = datetime.datetime.now(datetime.timezone.utc)
     start_date = end_date - datetime.timedelta(days=1)
 
-    # --- PRINT DE DEBUG AQUI ---
     print(f"[API] BUSCANDO DADOS ZENTRA (Incremental) para {ID_PONTO_ZENTRA_KM72}")
-    # --- FIM DO NOVO PRINT ---
 
     with httpx.Client() as client:
         for attempt in range(3):
@@ -337,24 +368,38 @@ def fetch_data_from_zentra_cloud():
             if r and r.status_code == 429 and attempt < 2: time.sleep(60)
     if not r or r.status_code != 200:
         adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO API Zentra (Incremental): Status {r.status_code if r else 'N/A'}")
-        return None
+        return None, None
     try:
         wc_data = next((d for n, d in r.json().get('data', {}).items() if 'water content' in n.lower()), None)
         if not wc_data:
             print(f"[API] Zentra: 'water content' não encontrado na resposta.")
-            return None
+            return None, None
+        
+        latest_timestamp = None
         latest_readings = {}
+        
         for s_block in wc_data:
             port = s_block.get('metadata', {}).get('port_number')
             if port in MAPA_ZENTRA_KM72 and s_block.get('readings'):
-                val = s_block['readings'][0].get('value')
-                if val is not None: latest_readings[MAPA_ZENTRA_KM72[port]] = float(val) * 100.0
+                # Pega a leitura mais recente (primeira da lista)
+                reading = s_block['readings'][0]
+                val = reading.get('value')
+                ts_iso = reading.get('datetime')
 
-        print(f"[API] Zentra: Dados de umidade lidos: {latest_readings}")
-        return latest_readings if latest_readings else None
+                if val is not None:
+                    latest_readings[MAPA_ZENTRA_KM72[port]] = float(val) * 100.0
+                
+                # Atualiza o timestamp mais recente encontrado em todos os sensores
+                if ts_iso:
+                    current_ts = datetime.datetime.fromisoformat(ts_iso).timestamp()
+                    if latest_timestamp is None or current_ts > latest_timestamp:
+                        latest_timestamp = current_ts
+
+        print(f"[API] Zentra: Dados de umidade lidos: {latest_readings} com timestamp {latest_timestamp}")
+        return latest_timestamp, latest_readings if latest_readings else None
     except Exception as e:
         adicionar_log(ID_PONTO_ZENTRA_KM72, f"ERRO Zentra (Processamento JSON): {e}")
-        return None
+        return None, None
 
 
 def backfill_zentra_km72_data():
@@ -368,14 +413,14 @@ def backfill_zentra_km72_data():
     total_registros_salvos = 0
     current_start = start_date
 
-    start_time = time.time()  # Início do timer
-    time_limit = BACKFILL_RUN_TIME_SEC  # Usando a constante definida em config.py
+    start_time = time.time()
+    time_limit = BACKFILL_RUN_TIME_SEC
 
     while current_start < end_date:
-        if (time.time() - start_time) > time_limit:  # Check time limit
+        if (time.time() - start_time) > time_limit:
             adicionar_log(id_ponto,
                           f"PAUSA (Backfill Zentra): Limite de {time_limit}s atingido. {total_registros_salvos} salvos nesta sessao.")
-            return False  # Signal to stop/pause
+            return False
 
         period_end = min(current_start + datetime.timedelta(days=7), end_date)
         print(f"[API Zentra Backfill] Buscando bloco: {current_start.date()} a {period_end.date()}")
@@ -413,7 +458,7 @@ def backfill_zentra_km72_data():
     if total_registros_salvos > 0:
         adicionar_log(id_ponto, f"SUCESSO (Backfill Zentra): {total_registros_salvos} registros salvos.")
 
-    return True  # Sinaliza que o backfill foi concluído
+    return True
 
 
 def backfill_weatherlink_data(id_ponto):
@@ -426,15 +471,15 @@ def backfill_weatherlink_data(id_ponto):
     dados_processados = []
     now_dt = datetime.datetime.now(datetime.timezone.utc)
 
-    start_time = time.time()  # Início do timer
-    time_limit = BACKFILL_RUN_TIME_SEC  # Usando a constante definida em config.py
+    start_time = time.time()
+    time_limit = BACKFILL_RUN_TIME_SEC
 
     try:
         with httpx.Client(timeout=60.0) as client:
             for i in range(4):
-                if (time.time() - start_time) > time_limit:  # Check time limit
+                if (time.time() - start_time) > time_limit:
                     adicionar_log(id_ponto, f"PAUSA (Backfill WL): Limite de {time_limit}s atingido.")
-                    return False  # Signal to stop/pause
+                    return False
 
                 end_dt = now_dt - datetime.timedelta(hours=24 * i)
                 start_dt = end_dt - datetime.timedelta(hours=24)
@@ -457,13 +502,12 @@ def backfill_weatherlink_data(id_ponto):
                     "api-signature": signature
                 }
 
-                response = client.get(url_base, params=params_to_send)
+                response = client.get(url_base, params=params_to_send, timeout=30.0)
                 response.raise_for_status()
 
                 data = response.json()
                 for sensor in data.get('sensors', []):
                     if sensor.get('sensor_type') == 48 or sensor.get('data_structure_type') == 10:
-                        # Iterar sobre os dados do sensor
                         for reg in sensor.get('data', []):
                             if 'rainfall_mm' in reg:
                                 dados_processados.append({
@@ -473,25 +517,25 @@ def backfill_weatherlink_data(id_ponto):
                                     "precipitacao_acumulada_mm": reg.get('rainfall_daily_mm')
                                 })
                 if i < 3: time.sleep(1)
-        if not dados_processados: return True  # Concluído, mas sem dados
+        if not dados_processados: return True
         df_backfill = pd.DataFrame(dados_processados)
         df_backfill['timestamp'] = pd.to_datetime(df_backfill['timestamp'], utc=True)
         save_to_sqlite(df_backfill)
         adicionar_log(id_ponto, f"SUCESSO (Backfill WeatherLink): {len(df_backfill)} registros salvos.")
-        return True  # Sinaliza que o backfill foi concluído
+        return True
 
     except HTTPStatusError as e:
         if e.response.status_code == 401:
             adicionar_log(id_ponto, f"AVISO: Falha na autenticação (401) para {id_ponto}. Backfill pulado.")
             print(f"[API {id_ponto}] AVISO: Falha na autenticação (401). Backfill pulado.")
-            return True  # Concluído/Pulado, não precisa de restart
+            return True
         else:
             adicionar_log(id_ponto, f"ERRO API WeatherLink (Backfill): {e}")
             print(f"[API {id_ponto}] ERRO API WeatherLink (Backfill): {e}")
             traceback.print_exc()
-            return True  # Concluído/Falhou, não precisa de restart
+            return True
     except Exception as e:
         adicionar_log(id_ponto, f"ERRO CRÍTICO (Backfill WeatherLink): {e}")
         print(f"[API {id_ponto}] ERRO CRÍTICO (Backfill WeatherLink): {e}")
         traceback.print_exc()
-        return True  # Concluído/Falhou, não precisa de restart
+        return True

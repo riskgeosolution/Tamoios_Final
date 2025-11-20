@@ -1,4 +1,4 @@
-# pages/general_dash.py (v12.6: CORREÇÃO VISUAL DO EIXO X)
+# pages/general_dash.py (VERSÃO FINAL E DEFINITIVA)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -11,9 +11,10 @@ from plotly.subplots import make_subplots
 from app import app, TEMPLATE_GRAFICO_MODERNO
 from config import PONTOS_DE_ANALISE, CORES_UMIDADE
 import processamento
+import data_source # Importado para consulta direta
 
 def get_layout():
-    """Retorna o layout do dashboard geral."""
+    """Retorna o layout do dashboard geral (APENAS GRÁFICOS)."""
     opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 96]
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Últimos 7 dias', 'value': 7 * 24}]
@@ -37,15 +38,21 @@ def get_layout():
 
 @app.callback(
     Output('general-dash-content', 'children'),
-    [Input('store-dados-sessao', 'data'),
+    # --- CORREÇÃO: Gatilho direto, sem depender de dcc.Store ---
+    [Input('intervalo-atualizacao-dados', 'n_intervals'),
      Input('general-graph-time-selector', 'value')]
 )
-def update_general_dashboard(dados_json, selected_hours):
-    if not dados_json or selected_hours is None:
+def update_general_dashboard(n_intervals, selected_hours):
+    if selected_hours is None:
         return dbc.Spinner(size="lg", children="Carregando dados...")
 
+    # --- CORREÇÃO: Busca os dados mais recentes diretamente do banco de dados ---
+    df_completo = data_source.read_data_from_sqlite(last_hours=100)
+
     try:
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
+        if df_completo.empty or 'timestamp' not in df_completo.columns:
+            return dbc.Alert("Dados históricos indisponíveis no momento.", color="warning")
+            
         df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp'])
         if df_completo['timestamp'].dt.tz is None:
             df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
@@ -56,19 +63,21 @@ def update_general_dashboard(dados_json, selected_hours):
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
 
     except Exception as e:
-        return dbc.Alert(f"Erro ao ler dados: {e}", color="danger")
+        return dbc.Alert(f"Erro ao processar dados: {e}", color="danger")
 
     layout_geral = []
     for id_ponto, config in PONTOS_DE_ANALISE.items():
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: continue
 
-        # --- INÍCIO DA CORREÇÃO: Preenchimento de dados de umidade ---
-        df_ponto = df_ponto.sort_values('timestamp')
+        df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
+        
         umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
-        # --- FIM DA CORREÇÃO ---
 
+        df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
+        df_chuva_periodo_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
+        
         ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
         limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
         df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
@@ -76,15 +85,9 @@ def update_general_dashboard(dados_json, selected_hours):
         if df_ponto_plot.empty: continue
 
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg({
-            'chuva_mm': 'sum',
-            'umidade_1m_perc': 'mean',
-            'umidade_2m_perc': 'mean',
-            'umidade_3m_perc': 'mean'
+            'chuva_mm': 'sum', 'umidade_1m_perc': 'mean', 'umidade_2m_perc': 'mean', 'umidade_3m_perc': 'mean'
         }).reset_index()
 
-        df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
-        df_chuva_periodo_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
-        
         df_chuva_72h_plot = df_chuva_72h_completo[df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
         df_chuva_periodo_plot = df_chuva_periodo_completo[df_chuva_periodo_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
 
@@ -99,41 +102,30 @@ def update_general_dashboard(dados_json, selected_hours):
         fig_chuva.add_trace(go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)', mode='lines', line=dict(color='green', width=2, dash='dot'), visible='legendonly'), secondary_y=True)
         
         fig_chuva.update_layout(
-            title_text=f"Pluviometria - {config['nome']} ({selected_hours}h)", template=TEMPLATE_GRAFICO_MODERNO,
+            title_text=f"Pluviometria - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
             margin=dict(l=40, r=20, t=50, b=80), legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
             xaxis_title="Data e Hora", yaxis_title="Pluviometria (mm/15min)", yaxis2_title=f"Acumulada ({selected_hours}h)",
             hovermode="x unified", bargap=0.1, hoverlabel=dict(bgcolor="white", font_size=12)
         )
-        # CORREÇÃO: Usando o formato de hora e minuto.
         fig_chuva.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
 
         fig_umidade = go.Figure()
-        fig_umidade.add_trace(go.Bar(x=df_plot_15min['timestamp_local'], y=[df_plot_15min[['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].max().max() * 1.1]*len(df_plot_15min) if not df_plot_15min.empty else [], hoverinfo='none', showlegend=False, marker_opacity=0))
         fig_umidade.add_trace(go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_1m_perc'], name='Umidade 1m', mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
         fig_umidade.add_trace(go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_2m_perc'], name='Umidade 2m', mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
         fig_umidade.add_trace(go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_3m_perc'], name='Umidade 3m', mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
 
         fig_umidade.update_layout(
-            title_text=f"Umidade do Solo - {config['nome']} ({selected_hours}h)", template=TEMPLATE_GRAFICO_MODERNO,
+            title_text=f"Umidade do Solo - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
             margin=dict(l=40, r=20, t=40, b=80), legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
             xaxis_title="Data e Hora", yaxis_title="Umidade do Solo (%)",
             hovermode="x unified", bargap=0, hoverlabel=dict(bgcolor="white", font_size=12)
         )
-        # CORREÇÃO: Usando o formato de hora e minuto.
         fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)
         
-        try:
-            all_umidade = pd.concat([df_plot_15min['umidade_1m_perc'], df_plot_15min['umidade_2m_perc'], df_plot_15min['umidade_3m_perc']]).dropna()
-            if not all_umidade.empty:
-                y_min = min(0, all_umidade.min() - 5)
-                y_max = max(50, all_umidade.max() + 5)
-                fig_umidade.update_yaxes(range=[y_min, y_max])
-        except Exception:
-            pass
-
         col_chuva = dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm mb-4"), width=12, lg=6)
         col_umidade = dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm mb-4"), width=12, lg=6)
         layout_geral.append(dbc.Row([col_chuva, col_umidade], className="mb-4"))
+        layout_geral.append(html.Hr())
 
     if not layout_geral:
         return dbc.Alert("Nenhum dado disponível para o período selecionado.", color="warning")
