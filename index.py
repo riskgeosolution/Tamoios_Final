@@ -107,12 +107,24 @@ def worker_main_loop():
 
         df_para_salvar = pd.merge(novos_dados_chuva_df, df_umidade_incremental, on=['timestamp', 'id_ponto'], how='outer')
 
+        # --- INÍCIO DA CORREÇÃO: Filtra dados que já existem no DB ---
+        if not df_para_salvar.empty and not historico_recente_df.empty:
+            # Cria uma chave única para cada linha (timestamp + id_ponto)
+            key_cols = ['timestamp', 'id_ponto']
+            df_para_salvar = df_para_salvar.set_index(key_cols)
+            historico_recente_df = historico_recente_df.set_index(key_cols)
+            
+            # Mantém apenas as linhas do novo DF cujo índice não existe no DF histórico
+            df_para_salvar = df_para_salvar[~df_para_salvar.index.isin(historico_recente_df.index)].reset_index()
+        # --- FIM DA CORREÇÃO ---
+
         if not df_para_salvar.empty:
             df_merged = df_para_salvar.groupby(['timestamp', 'id_ponto'], as_index=False).first()
             data_source.save_to_sqlite(df_merged)
-            historico_para_calculo = pd.concat([historico_recente_df, df_merged], ignore_index=True)
+            historico_para_calculo = pd.concat([historico_recente_df.reset_index(), df_merged], ignore_index=True)
         else:
-            historico_para_calculo = historico_recente_df
+            historico_para_calculo = historico_recente_df.reset_index() if isinstance(historico_recente_df.index, pd.MultiIndex) else historico_recente_df
+
 
         status_atualizado = {}
         if not historico_para_calculo.empty:
