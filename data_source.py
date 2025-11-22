@@ -9,12 +9,11 @@ import hmac
 from io import StringIO
 import warnings
 import time
-# REMOVIDO: import sqlite3
 from sqlalchemy import create_engine, inspect, text, bindparam, delete, table, column
 from httpx import HTTPStatusError
 import threading
-
-# REMOVIDO: from sqlalchemy.pool import NullPool, from sqlalchemy import event
+from sqlalchemy.pool import NullPool
+from sqlalchemy import event
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -32,7 +31,6 @@ from config import (
 # -----------------------------------------------------------------------------
 # -- VARIÁVEIS GLOBAIS DE CONEXÃO --
 # -----------------------------------------------------------------------------
-# Não precisamos mais de paths complexos. A conexão será controlada pelo Render.
 DB_CONNECTION_STRING = ""
 STATUS_FILE = "status_atual.json"
 LOG_FILE = "eventos.log"
@@ -47,11 +45,8 @@ COLUNAS_HISTORICO = [
 
 # --- FUNÇÃO DE ESCRITA SEGURA ---
 def write_with_timeout(file_path, content, mode='w', timeout=15):
-    """ Escreve log/status. """
-
     def target():
         try:
-            # Caminho corrigido para o disco persistente ou local
             full_file_path = os.path.join("/var/data", file_path) if os.environ.get('RENDER') else os.path.join(
                 os.getcwd(), file_path)
 
@@ -91,7 +86,7 @@ def ler_logs_eventos(id_ponto):
             os.getcwd(), LOG_FILE)
         with open(full_log_file_path, 'r', encoding='utf-8') as f:
             logs_str = f.read()
-        logs_list = logs_str.split('\n')
+        logs_list = logs_str.split('\n');
         logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
         return '\n'.join(logs_filtrados)
     except FileNotFoundError:
@@ -104,24 +99,20 @@ def setup_disk_paths():
     """ Define conexão. Usa DATABASE_URL (Postgres) ou SQLite local. """
     global DB_CONNECTION_STRING, DB_ENGINE
 
-    # 1. Tenta pegar a URL do Postgres (DATABASE_URL)
-    # Se não existir, usa o fallback SQLite (para testes locais)
     DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
-
     is_sqlite = "sqlite" in DB_CONNECTION_STRING
 
     if DB_ENGINE is None:
+
         if is_sqlite:
-            # Configurações para SQLite (mantidas apenas para testes locais)
-            connect_args = {"timeout": 30, "check_same_thread": False}
+            connect_args = {"check_same_thread": False, "timeout": 30}
         else:
-            # Configurações padrão para Postgres (sem NullPool, sem hacks)
-            connect_args = {"timeout": 30}
+            connect_args = {"connect_timeout": 30}
 
         DB_ENGINE = create_engine(
             DB_CONNECTION_STRING,
             connect_args=connect_args,
-            pool_pre_ping=True  # Recomendado para Postgres no Render
+            pool_pre_ping=True
         )
 
     adicionar_log("SISTEMA", f"Banco de Dados: {DB_CONNECTION_STRING.split('@')[-1]}")
@@ -135,21 +126,18 @@ def initialize_database():
             pass
         inspector = inspect(DB_ENGINE)
 
-        # O SQL Alchemy cria a tabela no Postgres ou SQLite
         if not inspector.has_table(DB_TABLE_NAME):
-            df_vazio = pd.DataFrame(columns=COLUNAS_HISTORICO)
+            df_vazio = pd.DataFrame(columns=COLUNAS_HISTORICO);
             df_vazio.to_sql(DB_TABLE_NAME, DB_ENGINE, index=False)
             adicionar_log("DB", f"Tabela '{DB_TABLE_NAME}' criada.")
 
         existing_indexes = []
         try:
-            indexes = inspector.get_indexes(DB_TABLE_NAME)
-            existing_indexes = [idx['name'] for idx in indexes]
+            indexes = inspector.get_indexes(DB_TABLE_NAME); existing_indexes = [idx['name'] for idx in indexes]
         except Exception:
             pass
 
         with DB_ENGINE.connect() as connection:
-            # Índices são criados para SQLite/Postgres.
             if 'idx_timestamp' not in existing_indexes:
                 try:
                     connection.execute(
@@ -166,7 +154,7 @@ def initialize_database():
             connection.commit()
         adicionar_log("DB", "Banco de dados verificado e pronto.")
     except Exception as e:
-        adicionar_log("SISTEMA", f"ERRO CRÍTICO DB Init: {e}", level="ERROR")
+        adicionar_log("SISTEMA", f"ERRO CRÍTICO DB Init: {e}", level="ERROR");
         traceback.print_exc()
 
 
@@ -175,8 +163,8 @@ def save_to_sqlite(df_novos_dados):
     if df_novos_dados.empty: return
     try:
         df_para_salvar = df_novos_dados.copy()
-        if 'timestamp' in df_para_salvar.columns:
-            df_para_salvar['timestamp'] = pd.to_datetime(df_para_salvar['timestamp'], utc=True)
+        if 'timestamp' in df_para_salvar.columns: df_para_salvar['timestamp'] = pd.to_datetime(
+            df_para_salvar['timestamp'], utc=True)
         colunas_para_salvar = [col for col in COLUNAS_HISTORICO if col in df_para_salvar.columns]
         df_para_salvar = df_para_salvar[colunas_para_salvar]
 
@@ -200,48 +188,49 @@ def delete_from_sqlite(timestamps):
         ts_strings = [pd.to_datetime(ts).strftime('%Y-%m-%d %H:%M:%S') for ts in timestamps]
         with DB_ENGINE.connect() as connection:
             t_historico = table(DB_TABLE_NAME, column('timestamp'))
-            # A cláusula IN funciona para Postgres e SQLite
             stmt = delete(t_historico).where(t_historico.c.timestamp.in_(ts_strings))
-            adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.")
-            connection.execute(stmt)
+            adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.");
+            connection.execute(stmt);
             connection.commit()
     except Exception as e:
-        adicionar_log("DB", f"ERRO CRÍTICO Deletar DB: {e}", level="ERROR")
-        traceback.print_exc()
+        adicionar_log("DB", f"ERRO CRÍTICO Deletar DB: {e}", level="ERROR"); traceback.print_exc()
 
 
 def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
-    """ Lê dados usando o Engine global (Postgres ou SQLite). """
+    """ Lê dados usando o Engine global. """
     global DB_ENGINE
 
     query_base = f"SELECT * FROM {DB_TABLE_NAME}"
-    conditions, params = [], {}
+
+    # --- CORREÇÃO AQUI ---
+    conditions = []
+    params = {}  # Inicializado como dicionário
+    # ---------------------
+
     if last_hours: start_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=last_hours)
     if id_ponto: conditions.append("id_ponto = :ponto"); params["ponto"] = id_ponto
     if start_dt: conditions.append("timestamp >= :start"); params["start"] = start_dt.strftime('%Y-%m-%d %H:%M:%S')
     if end_dt: conditions.append("timestamp < :end"); params["end"] = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+
     if conditions: query_base += " WHERE " + " AND ".join(conditions)
     query_base += " ORDER BY timestamp ASC"
 
     df = pd.DataFrame()
     try:
-        # Lê o DB de forma unificada. Postgres é thread-safe por natureza.
         with DB_ENGINE.connect() as connection:
             df = pd.read_sql_query(query_base, connection, params=params, parse_dates=["timestamp"])
-            connection.commit()  # Commit para garantir a consistência de leitura no Postgres
+            connection.commit()
 
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            # LOG DIAGNÓSTICO (mantido para monitorar latência do Postgres)
-            ultimo = df['timestamp'].max()
+            ultimo = df['timestamp'].max();
             ponto_log = id_ponto if id_ponto else 'GLOBAL'
             print(f"🔍 [DEBUG LEITURA] Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}")
 
         return df
     except Exception as e:
-        adicionar_log("DB", f"ERRO Leitura DB: {e}", level="ERROR")
-        return pd.DataFrame()
+        adicionar_log("DB", f"ERRO Leitura DB: {e}", level="ERROR"); return pd.DataFrame()
 
 
 def get_recent_data_for_worker(hours=73): return read_data_from_sqlite(last_hours=hours)
@@ -306,7 +295,7 @@ def fetch_data_from_weatherlink_api():
                               "chuva_mm": s.get('rainfall_last_15_min_mm', 0.0) or 0.0,
                               "precipitacao_acumulada_mm": s.get('rainfall_daily_mm')})
             except Exception as e:
-                adicionar_log(id_ponto, f"Erro API WL: {e}", level="ERROR")
+                adicionar_log("DB", f"ERRO API WL: {e}", level="ERROR")
     df = pd.DataFrame(dados);
     if not df.empty and 'timestamp' in df.columns: df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
     return df, None, logs
