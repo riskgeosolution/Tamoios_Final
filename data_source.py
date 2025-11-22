@@ -9,11 +9,11 @@ import hmac
 from io import StringIO
 import warnings
 import time
-# Importando NullPool para forçar atualização em disco de rede
 from sqlalchemy import create_engine, inspect, text, bindparam, delete, table, column
 from sqlalchemy.pool import NullPool
 from httpx import HTTPStatusError
 import threading
+from sqlalchemy import event
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -92,7 +92,7 @@ def ler_logs_eventos(id_ponto):
 
 
 def setup_disk_paths():
-    """ Define caminhos e inicializa o DB_ENGINE global. """
+    """ Define caminhos e inicializa o DB_ENGINE global com WAL ativado. """
     global DATA_DIR, STATUS_FILE, LOG_FILE, DB_CONNECTION_STRING, DB_ENGINE
 
     DB_FILENAME = "temp_local_db.db"
@@ -107,14 +107,20 @@ def setup_disk_paths():
     print(f"DEBUG: setup_disk_paths - DB_CONNECTION_STRING: {DB_CONNECTION_STRING}")
 
     if DB_ENGINE is None:
-        # CORREÇÃO CRÍTICA PARA O RENDER:
-        # check_same_thread=False: Permite que o Worker escreva e o Dash leia sem travar.
-        # poolclass=NullPool: Desativa cache de conexão, forçando leitura fresca do disco.
+        # Cria o engine com NullPool (evita cache de conexão)
         DB_ENGINE = create_engine(
             DB_CONNECTION_STRING,
             connect_args={"timeout": 30, "check_same_thread": False},
             poolclass=NullPool
         )
+
+        # Ativa o modo WAL (Write-Ahead Logging) para concorrência
+        @event.listens_for(DB_ENGINE, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
 
     STATUS_FILE = os.path.join(DATA_DIR, "status_atual.json")
     LOG_FILE = os.path.join(DATA_DIR, "eventos.log")
@@ -125,7 +131,10 @@ def setup_disk_paths():
 
 def initialize_database():
     global DB_ENGINE
-    if DB_ENGINE is None: raise Exception("DB_ENGINE não inicializado.")
+    if DB_ENGINE is None:
+        # Fallback de segurança se setup_disk_paths não tiver sido chamado
+        setup_disk_paths()
+
     try:
         with DB_ENGINE.connect() as connection:
             pass
@@ -211,6 +220,13 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         df = pd.read_sql_query(query_base, DB_ENGINE, params=params, parse_dates=["timestamp"])
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+
+            # --- LOG DIAGNÓSTICO PARA O RENDER ---
+            if id_ponto:  # Só loga se for uma consulta específica, para não poluir demais
+                ultimo_dado = df['timestamp'].max()
+                print(f"🔍 [DEBUG LEITURA] Ponto: {id_ponto} | Último Dado Lido: {ultimo_dado}")
+            # -------------------------------------
+
         return df
     except Exception as e:
         adicionar_log("DB", f"ERRO Leitura SQLite: {e}", level="ERROR")
