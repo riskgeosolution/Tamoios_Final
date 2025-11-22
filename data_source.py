@@ -9,12 +9,12 @@ import hmac
 from io import StringIO
 import warnings
 import time
-import sqlite3  # Adicionado para leitura nativa
+# REMOVIDO: import sqlite3
 from sqlalchemy import create_engine, inspect, text, bindparam, delete, table, column
-from sqlalchemy.pool import NullPool
 from httpx import HTTPStatusError
 import threading
-from sqlalchemy import event  # Importado para listeners
+
+# REMOVIDO: from sqlalchemy.pool import NullPool, from sqlalchemy import event
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -32,9 +32,8 @@ from config import (
 # -----------------------------------------------------------------------------
 # -- VARIÁVEIS GLOBAIS DE CONEXÃO --
 # -----------------------------------------------------------------------------
-DATA_DIR = "."
+# Não precisamos mais de paths complexos. A conexão será controlada pelo Render.
 DB_CONNECTION_STRING = ""
-SQLITE_FILE_PATH = ""  # Caminho absoluto do arquivo SQLite
 STATUS_FILE = "status_atual.json"
 LOG_FILE = "eventos.log"
 DB_ENGINE = None
@@ -46,21 +45,17 @@ COLUNAS_HISTORICO = [
 ]
 
 
-# --- FUNÇÃO HELPER PARA ATIVAR WAL (Listener do SQLAlchemy) ---
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
-
-
 # --- FUNÇÃO DE ESCRITA SEGURA ---
 def write_with_timeout(file_path, content, mode='w', timeout=15):
+    """ Escreve log/status. """
+
     def target():
         try:
-            data_dir_log = os.path.join(os.getcwd(), file_path) if not os.environ.get('RENDER') else os.path.join(
-                '/var/data', file_path)
-            with open(data_dir_log, mode, encoding='utf-8') as f:
+            # Caminho corrigido para o disco persistente ou local
+            full_file_path = os.path.join("/var/data", file_path) if os.environ.get('RENDER') else os.path.join(
+                os.getcwd(), file_path)
+
+            with open(full_file_path, mode, encoding='utf-8') as f:
                 if isinstance(content, str):
                     f.write(content)
                 else:
@@ -92,9 +87,9 @@ def adicionar_log(id_ponto, mensagem, level="INFO"):
 
 def ler_logs_eventos(id_ponto):
     try:
-        data_dir_log = os.path.join(os.getcwd(), LOG_FILE) if not os.environ.get('RENDER') else os.path.join(
-            '/var/data', LOG_FILE)
-        with open(data_dir_log, 'r', encoding='utf-8') as f:
+        full_log_file_path = os.path.join("/var/data", LOG_FILE) if os.environ.get('RENDER') else os.path.join(
+            os.getcwd(), LOG_FILE)
+        with open(full_log_file_path, 'r', encoding='utf-8') as f:
             logs_str = f.read()
         logs_list = logs_str.split('\n')
         logs_filtrados = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
@@ -106,33 +101,30 @@ def ler_logs_eventos(id_ponto):
 
 
 def setup_disk_paths():
-    """ Define conexão e o path absoluto do arquivo DB. """
-    global DB_CONNECTION_STRING, DB_ENGINE, SQLITE_FILE_PATH
+    """ Define conexão. Usa DATABASE_URL (Postgres) ou SQLite local. """
+    global DB_CONNECTION_STRING, DB_ENGINE
 
-    DB_FILENAME = "temp_local_db.db"
+    # 1. Tenta pegar a URL do Postgres (DATABASE_URL)
+    # Se não existir, usa o fallback SQLite (para testes locais)
+    DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
 
-    if os.environ.get('RENDER'):
-        DB_DIR = "/var/data"
-    else:
-        DB_DIR = "."
-
-    SQLITE_FILE_PATH = os.path.join(DB_DIR, DB_FILENAME)
-    DB_CONNECTION_STRING = f'sqlite:///{SQLITE_FILE_PATH}'
-
-    print(f"DEBUG: setup_disk_paths - DB_CONNECTION_STRING: {DB_CONNECTION_STRING}")
+    is_sqlite = "sqlite" in DB_CONNECTION_STRING
 
     if DB_ENGINE is None:
-        # Cria o engine principal (Escritor)
+        if is_sqlite:
+            # Configurações para SQLite (mantidas apenas para testes locais)
+            connect_args = {"timeout": 30, "check_same_thread": False}
+        else:
+            # Configurações padrão para Postgres (sem NullPool, sem hacks)
+            connect_args = {"timeout": 30}
+
         DB_ENGINE = create_engine(
             DB_CONNECTION_STRING,
-            connect_args={"timeout": 30, "check_same_thread": False},
-            poolclass=NullPool
+            connect_args=connect_args,
+            pool_pre_ping=True  # Recomendado para Postgres no Render
         )
 
-        # ANEXA O LISTENER DE WAL (CORREÇÃO DO INVALIDREQUESTERROR)
-        event.listen(DB_ENGINE, "connect", set_sqlite_pragma)
-
-    adicionar_log("SISTEMA", f"Banco de Dados: {DB_CONNECTION_STRING}")
+    adicionar_log("SISTEMA", f"Banco de Dados: {DB_CONNECTION_STRING.split('@')[-1]}")
 
 
 def initialize_database():
@@ -142,6 +134,8 @@ def initialize_database():
         with DB_ENGINE.connect() as connection:
             pass
         inspector = inspect(DB_ENGINE)
+
+        # O SQL Alchemy cria a tabela no Postgres ou SQLite
         if not inspector.has_table(DB_TABLE_NAME):
             df_vazio = pd.DataFrame(columns=COLUNAS_HISTORICO)
             df_vazio.to_sql(DB_TABLE_NAME, DB_ENGINE, index=False)
@@ -155,6 +149,7 @@ def initialize_database():
             pass
 
         with DB_ENGINE.connect() as connection:
+            # Índices são criados para SQLite/Postgres.
             if 'idx_timestamp' not in existing_indexes:
                 try:
                     connection.execute(
@@ -176,7 +171,6 @@ def initialize_database():
 
 
 def save_to_sqlite(df_novos_dados):
-    """ Salva dados no DB_ENGINE (Escritor). """
     global DB_ENGINE
     if df_novos_dados.empty: return
     try:
@@ -196,7 +190,7 @@ def save_to_sqlite(df_novos_dados):
         if "UNIQUE constraint failed" in str(e):
             adicionar_log("DB", "Aviso: Dados duplicados ignorados.", level="WARN")
         else:
-            adicionar_log("DB", f"ERRO CRÍTICO Salvar SQLite: {e}", level="ERROR")
+            adicionar_log("DB", f"ERRO CRÍTICO Salvar DB: {e}", level="ERROR")
 
 
 def delete_from_sqlite(timestamps):
@@ -206,18 +200,19 @@ def delete_from_sqlite(timestamps):
         ts_strings = [pd.to_datetime(ts).strftime('%Y-%m-%d %H:%M:%S') for ts in timestamps]
         with DB_ENGINE.connect() as connection:
             t_historico = table(DB_TABLE_NAME, column('timestamp'))
+            # A cláusula IN funciona para Postgres e SQLite
             stmt = delete(t_historico).where(t_historico.c.timestamp.in_(ts_strings))
             adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.")
             connection.execute(stmt)
             connection.commit()
     except Exception as e:
-        adicionar_log("DB", f"ERRO CRÍTICO Deletar SQLite: {e}", level="ERROR")
+        adicionar_log("DB", f"ERRO CRÍTICO Deletar DB: {e}", level="ERROR")
         traceback.print_exc()
 
 
 def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
-    """ Lê dados usando conexão nativa para forçar o cache break do NFS. """
-    global SQLITE_FILE_PATH
+    """ Lê dados usando o Engine global (Postgres ou SQLite). """
+    global DB_ENGINE
 
     query_base = f"SELECT * FROM {DB_TABLE_NAME}"
     conditions, params = [], {}
@@ -228,38 +223,25 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
     if conditions: query_base += " WHERE " + " AND ".join(conditions)
     query_base += " ORDER BY timestamp ASC"
 
-    query_sql = query_base
     df = pd.DataFrame()
-
     try:
-        # 1. Conexão NATIVA (sem pool, sem cache) com busy_timeout de segurança
-        conn = sqlite3.connect(SQLITE_FILE_PATH, timeout=10)
-
-        # 2. Executa PRAGMAs para garantir a visibilidade dos dados WAL (segurança máxima de leitura)
-        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-        conn.execute("PRAGMA busy_timeout=5000")
-
-        # 3. Executa a leitura
-        df = pd.read_sql_query(query_sql, conn, params=params, parse_dates=["timestamp"])
-
-        # 4. Fecha a conexão imediatamente
-        conn.close()
+        # Lê o DB de forma unificada. Postgres é thread-safe por natureza.
+        with DB_ENGINE.connect() as connection:
+            df = pd.read_sql_query(query_base, connection, params=params, parse_dates=["timestamp"])
+            connection.commit()  # Commit para garantir a consistência de leitura no Postgres
 
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            # LOG DIAGNÓSTICO
+            # LOG DIAGNÓSTICO (mantido para monitorar latência do Postgres)
             ultimo = df['timestamp'].max()
             ponto_log = id_ponto if id_ponto else 'GLOBAL'
             print(f"🔍 [DEBUG LEITURA] Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}")
 
         return df
     except Exception as e:
-        adicionar_log("DB", f"ERRO Leitura SQLite Nativa: {e}", level="ERROR")
+        adicionar_log("DB", f"ERRO Leitura DB: {e}", level="ERROR")
         return pd.DataFrame()
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
 
 def get_recent_data_for_worker(hours=73): return read_data_from_sqlite(last_hours=hours)
@@ -268,7 +250,8 @@ def get_recent_data_for_worker(hours=73): return read_data_from_sqlite(last_hour
 def get_all_data_for_dashboard():
     df_completo = read_data_from_sqlite(last_hours=100)
     status_atual = get_status_from_disk()
-    DATA_DIR_BASE = os.path.join(os.getcwd(), "") if not os.environ.get('RENDER') else os.path.join('/var/data', "")
+
+    DATA_DIR_BASE = os.path.join("/var/data", "") if os.environ.get('RENDER') else os.path.join(os.getcwd(), "")
 
     try:
         with open(os.path.join(DATA_DIR_BASE, LOG_FILE), 'r', encoding='utf-8') as f:
@@ -279,7 +262,7 @@ def get_all_data_for_dashboard():
 
 
 def get_status_from_disk():
-    DATA_DIR_BASE = os.path.join(os.getcwd(), "") if not os.environ.get('RENDER') else os.path.join('/var/data', "")
+    DATA_DIR_BASE = os.path.join("/var/data", "") if os.environ.get('RENDER') else os.path.join(os.getcwd(), "")
     try:
         with open(os.path.join(DATA_DIR_BASE, STATUS_FILE), 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -386,7 +369,30 @@ def backfill_zentra_km72_data():
     start_time = time.time()
     while current < end_date:
         if (time.time() - start_time) > BACKFILL_RUN_TIME_SEC: break
-        # ... (restante da lógica de backfill omitida para brevidade, mas deve usar 'dados_por_timestamp' corretamente) ...
+        period_end = min(current + datetime.timedelta(days=7), end_date)
+        with httpx.Client(timeout=60.0) as client:
+            response = _get_readings_zentra(client, ZENTRA_STATION_SERIAL, current, period_end)
+        if response and response.status_code == 200:
+            try:
+                wc_data = next((d for n, d in response.json().get('data', {}).items() if 'water content' in n.lower()),
+                               None)
+                if wc_data:
+                    dados_por_timestamp = {}
+                    for sb in wc_data:
+                        port = sb.get('metadata', {}).get('port_number');
+                        if port in MAPA_ZENTRA_KM72:
+                            col = MAPA_ZENTRA_KM72[port]
+                            for r in sb.get('readings', []):
+                                ts, val = r.get('datetime'), r.get('value')
+                                if ts and val:
+                                    ts_arr = arredondar_timestamp_10min(datetime.datetime.fromisoformat(ts).timestamp())
+                                    if ts_arr not in dados_por_timestamp: dados_por_timestamp[ts_arr] = {}
+                                    dados_por_timestamp[ts_arr][col] = float(val) * 100.0
+                    if dados_por_timestamp: df = pd.DataFrame(
+                        [{'timestamp': k, 'id_ponto': id_ponto, **v} for k, v in dados_por_timestamp.items()]); df[
+                        'timestamp'] = pd.to_datetime(df['timestamp'], utc=True); save_to_sqlite(df)
+            except Exception:
+                pass
         current += datetime.timedelta(days=7);
         time.sleep(1)
     return True
