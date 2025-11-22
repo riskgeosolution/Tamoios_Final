@@ -224,7 +224,7 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            # --- CORREÇÃO DE LOG: Imprime sempre no update do store ---
+            # LOG DIAGNÓSTICO
             ultimo = df['timestamp'].max()
             ponto_log = id_ponto if id_ponto else 'GLOBAL'
             print(f"🔍 [DEBUG LEITURA] Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}")
@@ -257,9 +257,11 @@ def get_status_from_disk():
         return {p: {"status": "SEM DADOS"} for p in PONTOS_DE_ANALISE.keys()}
 
 
-# --- INTEGRAÇÃO WEATHERLINK (Mantida Igual) ---
+# --- FUNÇÕES DE INTEGRAÇÃO API ---
+
 def calculate_hmac_signature(params, api_secret):
     string_para_assinar = "".join(f"{key}{params[key]}" for key in sorted(params.keys()))
+    # CORREÇÃO DE TYPO AQUI: string_para_assinar (correto)
     return hmac.new(api_secret.encode('utf-8'), string_para_assinar.encode('utf-8'), hashlib.sha256).hexdigest()
 
 
@@ -298,7 +300,6 @@ def fetch_data_from_weatherlink_api():
     return df, None, logs
 
 
-# --- INTEGRAÇÃO ZENTRA CLOUD (Mantida Igual) ---
 def _get_readings_zentra(client, station_serial, start_date, end_date):
     url = f"{ZENTRA_BASE_URL}/get_readings/";
     params = {"device_sn": station_serial, "start": start_date.strftime("%Y-%m-%d"),
@@ -335,7 +336,7 @@ def fetch_data_from_zentra_cloud():
                     if ts_iso and value is not None:
                         ts_arr = arredondar_timestamp_10min(datetime.datetime.fromisoformat(ts_iso).timestamp())
                         if ts_arr not in dados_por_timestamp: dados_por_timestamp[ts_arr] = {}
-                        dados[ts_arr][coluna] = float(value) * 100.0
+                        dados_por_timestamp[ts_arr][coluna] = float(value) * 100.0
         if not dados_por_timestamp: return pd.DataFrame()
         df_bloco = pd.DataFrame(
             [{'timestamp': ts, 'id_ponto': ID_PONTO_ZENTRA_KM72, **v} for ts, v in dados_por_timestamp.items()])
@@ -345,7 +346,6 @@ def fetch_data_from_zentra_cloud():
         adicionar_log(ID_PONTO_ZENTRA_KM72, f"Erro JSON Zentra: {e}", level="ERROR"); return pd.DataFrame()
 
 
-# --- BACKFILL (Mantido Igual) ---
 def backfill_zentra_km72_data():
     id_ponto = ID_PONTO_ZENTRA_KM72;
     adicionar_log(id_ponto, "Iniciando backfill Zentra.")
@@ -365,7 +365,7 @@ def backfill_zentra_km72_data():
                 wc_data = next((d for n, d in response.json().get('data', {}).items() if 'water content' in n.lower()),
                                None)
                 if wc_data:
-                    dados = {}
+                    dados_por_timestamp = {}
                     for sb in wc_data:
                         port = sb.get('metadata', {}).get('port_number');
                         if port in MAPA_ZENTRA_KM72:
@@ -374,10 +374,10 @@ def backfill_zentra_km72_data():
                                 ts, val = r.get('datetime'), r.get('value')
                                 if ts and val:
                                     ts_arr = arredondar_timestamp_10min(datetime.datetime.fromisoformat(ts).timestamp())
-                                    if ts_arr not in dados: dados[ts_arr] = {}
-                                    dados[ts_arr][col] = float(val) * 100.0
-                    if dados: df = pd.DataFrame(
-                        [{'timestamp': k, 'id_ponto': id_ponto, **v} for k, v in dados.items()]); df[
+                                    if ts_arr not in dados_por_timestamp: dados_por_timestamp[ts_arr] = {}
+                                    dados_por_timestamp[ts_arr][col] = float(val) * 100.0
+                    if dados_por_timestamp: df = pd.DataFrame(
+                        [{'timestamp': k, 'id_ponto': id_ponto, **v} for k, v in dados_por_timestamp.items()]); df[
                         'timestamp'] = pd.to_datetime(df['timestamp'], utc=True); save_to_sqlite(df)
             except Exception:
                 pass
