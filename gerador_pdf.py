@@ -1,5 +1,3 @@
-# gerador_pdf.py (v12.11: MOVIDO CACHE PARA O TOPO PARA EVITAR CICLOS)
-
 import io
 from fpdf import FPDF
 from datetime import datetime
@@ -12,9 +10,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 # ==============================================================================
-# --- DEFINIÇÕES DE CACHE E LOCKS (MOVIDO PARA O TOPO) ---
-# O erro "cannot import name 'PDF_CACHE_LOCK'" ocorre se a importação acontecer
-# antes destas linhas serem executadas.
+# --- DEFINIÇÕES DE CACHE E LOCKS ---
 # ==============================================================================
 
 PDF_CACHE = {}
@@ -22,15 +18,43 @@ PDF_CACHE_LOCK = threading.Lock()
 EXCEL_CACHE = {}
 EXCEL_CACHE_LOCK = threading.Lock()
 
-# --- IMPORTAÇÕES DE MÓDULOS LOCAIS ---
 import data_source
 from config import PONTOS_DE_ANALISE, RISCO_MAP, STATUS_MAP_HIERARQUICO, CORES_ALERTAS_CSS
 
 
-# -----------------------------------------------------------------------------
+def _get_and_consolidate_data(start_date, end_date, id_ponto):
+    # Converte datas de entrada para UTC
+    start_dt = pd.to_datetime(start_date).tz_localize('America/Sao_Paulo').tz_convert('UTC')
+    end_dt = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).tz_localize('America/Sao_Paulo').tz_convert('UTC')
 
-# --- FUNÇÕES DE GERAÇÃO DE RELATÓRIO ---
-# ... (Restante do código da criação de relatórios, incluindo _get_and_consolidate_data, thread_gerar_pdf, etc.) ...
+    df_brutos = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
+    if df_brutos.empty: return pd.DataFrame()
+
+    cols_para_numeric = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    for col in cols_para_numeric:
+        if col in df_brutos.columns:
+            df_brutos[col] = pd.to_numeric(df_brutos[col], errors='coerce')
+
+    df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
+
+    # Agrega os dados (Reamostragem em 10 minutos)
+    df_consolidado = df_brutos.set_index('timestamp_local').resample('10T').agg({
+        'chuva_mm': 'sum',
+        'umidade_1m_perc': 'mean',
+        'umidade_2m_perc': 'mean',
+        'umidade_3m_perc': 'mean'
+    })  # Não resetamos o index ainda para poder fazer o ffill corretamente
+
+    # --- CORREÇÃO DOS BURACOS (FFILL) ---
+    # Preenche vazios de umidade com o valor anterior
+    cols_umidade = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    df_consolidado[cols_umidade] = df_consolidado[cols_umidade].ffill()
+
+    # Chuva vazia deve ser 0
+    df_consolidado['chuva_mm'] = df_consolidado['chuva_mm'].fillna(0)
+
+    return df_consolidado.reset_index()
+
 
 def criar_relatorio_excel_em_memoria(df_consolidado, nome_ponto):
     output = io.BytesIO()
@@ -110,23 +134,18 @@ def _add_matplotlib_fig(pdf, fig, base_title, periodo_str):
 
 
 def _criar_graficos_pdf(df_consolidado, nome_ponto):
-    # --- GRÁFICO DE CHUVA (LÓGICA CORRIGIDA E LOCAL) ---
     fig_chuva, ax1 = plt.subplots(figsize=(10, 5))
     ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#5F6B7C', alpha=0.8,
-            label='Pluv. (mm/10min)', width=1 / (96 * 1.5)) # Ajuste de largura
+            label='Pluv. (mm/10min)', width=1 / (96 * 1.5))
     ax1.set_xlabel("Data e Hora")
     ax1.set_ylabel("Pluviometria (mm/10min)", color='#2C3E50')
     ax1.tick_params(axis='x', rotation=45, labelsize=8)
     ax1.grid(True, linestyle='--', alpha=0.6)
-
     ax2 = ax1.twinx()
-    # CORREÇÃO: Cálculo do acumulado feito localmente, de forma segura.
-    # A janela é 72h * 6 (intervalos de 10min por hora) = 432
     df_consolidado['chuva_acum_72h'] = df_consolidado['chuva_mm'].rolling(window=432, min_periods=1).sum()
     ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_72h'], color='#007BFF', linewidth=2.5,
              label='Acumulada (72h)')
     ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
-
     fig_chuva.suptitle(f"Pluviometria - Estação {nome_ponto}", fontsize=12)
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -134,7 +153,6 @@ def _criar_graficos_pdf(df_consolidado, nome_ponto):
                bbox_to_anchor=(0.5, -0.2))
     fig_chuva.tight_layout(rect=[0, 0.05, 1, 0.95])
 
-    # --- GRÁFICO DE UMIDADE ---
     fig_umidade, ax_umidade = plt.subplots(figsize=(10, 5))
     ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_1m_perc'], label='1m',
                     color=CORES_ALERTAS_CSS['verde'], linewidth=2)
@@ -149,42 +167,7 @@ def _criar_graficos_pdf(df_consolidado, nome_ponto):
     ax_umidade.tick_params(axis='x', rotation=45, labelsize=8)
     fig_umidade.legend(loc='upper center', ncol=3, fancybox=True, shadow=True, bbox_to_anchor=(0.5, -0.2))
     fig_umidade.tight_layout(rect=[0, 0.05, 1, 0.95])
-
     return fig_chuva, fig_umidade
-
-
-def _get_and_consolidate_data(start_date, end_date, id_ponto):
-    # Converte datas de entrada para UTC
-    start_dt = pd.to_datetime(start_date).tz_localize('America/Sao_Paulo').tz_convert('UTC')
-    end_dt = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).tz_localize('America/Sao_Paulo').tz_convert('UTC')
-
-    # 1. Busca dados brutos do DB
-    df_brutos = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
-
-    if df_brutos.empty: return pd.DataFrame()
-
-    # --- INÍCIO DA CORREÇÃO CRÍTICA DE TIPAGEM (Resolve o TypeError) ---
-    cols_para_numeric = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
-
-    for col in cols_para_numeric:
-        if col in df_brutos.columns:
-            # Garante que a coluna só tenha números (coerção de strings inválidas para NaN)
-            df_brutos[col] = pd.to_numeric(df_brutos[col], errors='coerce')
-    # --- FIM DA CORREÇÃO CRÍTICA DE TIPAGEM ---
-
-    # 2. Converte o timestamp para o fuso horário local (necessário para o resample)
-    df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
-
-    # 3. Agrega os dados (Reamostragem em 10 minutos)
-    df_consolidado = df_brutos.set_index('timestamp_local').resample('10T').agg({
-        'chuva_mm': 'sum',
-        'umidade_1m_perc': 'mean',
-        'umidade_2m_perc': 'mean',
-        'umidade_3m_perc': 'mean'
-    }).reset_index()
-
-    df_consolidado['chuva_mm'] = df_consolidado['chuva_mm'].fillna(0)
-    return df_consolidado
 
 
 def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
@@ -206,17 +189,12 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto):
     try:
         df_consolidado = _get_and_consolidate_data(start_date, end_date, id_ponto)
         if df_consolidado.empty: raise Exception("Sem dados no período selecionado.")
-        periodo_str = f"{pd.to_datetime(start_date).strftime('%d/%m/%Y')} a {pd.to_datetime(end_date).strftime('%d/%m/%Y')}"
         nome_ponto = PONTOS_DE_ANALISE.get(id_ponto, {}).get("nome", "Desconhecido")
-        
-        # --- INÍCIO DA CORREÇÃO ---
+        periodo_str = f"{pd.to_datetime(start_date).strftime('%d/%m/%Y')} a {pd.to_datetime(end_date).strftime('%d/%m/%Y')}"
+
         status_json = data_source.get_status_from_disk()
         status_info = status_json.get(id_ponto, {})
-        status_texto = status_info.get('status', 'INDEFINIDO') if isinstance(status_info, dict) else status_info
-        # --- FIM DA CORREÇÃO ---
 
-        risco = RISCO_MAP.get(status_texto, -1)
-        _, status_cor, _ = STATUS_MAP_HIERARQUICO.get(risco, ("INDEFINIDO", "secondary", "bg-secondary"))
         pdf_buffer = criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto)
         nome_arquivo = f"Relatorio_{nome_ponto}_{datetime.now().strftime('%Y%m%d')}.pdf"
         with PDF_CACHE_LOCK:

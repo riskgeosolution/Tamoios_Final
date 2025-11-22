@@ -16,7 +16,6 @@ import uuid
 from threading import Thread
 import json
 
-# Garante que o Matplotlib não tente abrir janelas no servidor
 plt.switch_backend('Agg')
 
 from app import app, TEMPLATE_GRAFICO_MODERNO
@@ -28,36 +27,28 @@ from config import (
 import processamento
 import gerador_pdf
 import data_source
-
 from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
 
 
 def get_layout():
-    """ Retorna o layout da página de dashboard específico. """
     opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 84, 96]
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico (Máx 7 dias)', 'value': 7 * 24}]
 
     layout = dbc.Container([
-        dcc.Store(id='store-id-ponto-ativo'),
-        dcc.Store(id='store-logs-filtrados'),
-        dcc.Store(id='pdf-task-id-store'),
-        dcc.Store(id='excel-task-id-store'),
-        dcc.Interval(id='pdf-check-interval', interval=2 * 1000, n_intervals=0, disabled=True),
-        dcc.Interval(id='excel-check-interval', interval=2 * 1000, n_intervals=0, disabled=True),
-
+        dcc.Store(id='store-id-ponto-ativo'), dcc.Store(id='store-logs-filtrados'),
+        dcc.Store(id='pdf-task-id-store'), dcc.Store(id='excel-task-id-store'),
+        dcc.Interval(id='pdf-check-interval', interval=2000, n_intervals=0, disabled=True),
+        dcc.Interval(id='excel-check-interval', interval=2000, n_intervals=0, disabled=True),
         html.Div(id='specific-dash-title', className="my-3 text-center"),
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
-
         dbc.Row([
             dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"),
             dbc.Col(dcc.Dropdown(id='graph-time-selector', options=opcoes_tempo, value=72, clearable=False,
                                  searchable=False), width=12, lg=4),
             dbc.Col(html.Div(id='dynamic-accumulated-output'), width=12, lg=4, className="d-flex align-items-center")
         ], align="center", className="my-3"),
-
         dbc.Row(id='specific-dash-graphs', children=[dbc.Spinner(size="lg")], className="my-4"),
-
         dbc.Row([
             dbc.Col([
                 html.H5("Relatórios e Eventos", className="mb-3"),
@@ -68,151 +59,109 @@ def get_layout():
                                         end_date=pd.Timestamp.now().date(), display_format='DD/MM/YYYY',
                                         className="mb-3 w-100"),
                     html.Br(),
-                    html.Div([
-                        dbc.Button("Gerar PDF", id='btn-pdf-especifico', color="primary", size="sm", className="me-2"),
-                        dcc.Download(id='download-pdf-especifico'),
-                        dbc.Button("Gerar Excel", id='btn-excel-especifico', color="success", size="sm"),
-                        dcc.Download(id='download-excel-especifico')
-                    ], className="d-flex justify-content-center"),
+                    html.Div(
+                        [dbc.Button("Gerar PDF", id='btn-pdf-especifico', color="primary", size="sm", className="me-2"),
+                         dcc.Download(id='download-pdf-especifico'),
+                         dbc.Button("Gerar Excel", id='btn-excel-especifico', color="success", size="sm"),
+                         dcc.Download(id='download-excel-especifico')], className="d-flex justify-content-center"),
                     html.Div(id='report-status-indicator', children=None,
                              className="text-center mt-3 small text-muted"),
-                    dbc.Alert("Não há dados neste período para gerar o relatório.", id="alert-pdf-error",
-                              color="danger", is_open=False, dismissable=True, className="mt-3"),
-                    dbc.Alert("Erro desconhecido ao gerar relatório.", id="alert-pdf-generic-error", color="danger",
-                              is_open=False, dismissable=True, className="mt-3"),
+                    dbc.Alert("Sem dados para relatório.", id="alert-pdf-error", color="danger", is_open=False,
+                              dismissable=True, className="mt-3"),
+                    dbc.Alert("Erro desconhecido.", id="alert-pdf-generic-error", color="danger", is_open=False,
+                              dismissable=True, className="mt-3"),
                 ]), className="shadow-sm mb-4"),
-                dbc.Card(dbc.CardBody([
-                    html.H6("Logs de Eventos", className="card-title"),
-                    dbc.Button("Ver Histórico de Eventos do Ponto", id='btn-ver-logs', color="secondary", size="sm")
-                ], className="text-center"), className="shadow-sm"),
+                dbc.Card(dbc.CardBody([html.H6("Logs de Eventos", className="card-title"),
+                                       dbc.Button("Ver Histórico", id='btn-ver-logs', color="secondary", size="sm")],
+                                      className="text-center"), className="shadow-sm"),
             ]),
         ], justify="center", className="mb-5"),
-
         dbc.Modal([
-            dbc.ModalHeader("Histórico de Eventos do Ponto"),
-            dbc.ModalBody(dcc.Loading(children=[
+            dbc.ModalHeader("Histórico de Eventos"), dbc.ModalBody(dcc.Loading(children=[
                 html.Div(id='modal-logs-content', style={'whiteSpace': 'pre-wrap', 'wordWrap': 'break-word'})])),
-            dbc.ModalFooter([
-                dcc.Loading(id="loading-pdf-logs", type="default", children=[
-                    dbc.Button("Gerar PDF dos Logs", id='btn-pdf-logs', color="success", className="me-2"),
-                    dcc.Download(id='download-pdf-logs')
-                ]),
-                dbc.Button("Fechar", id='btn-fechar-logs', color="secondary")
-            ]),
+            dbc.ModalFooter([dcc.Loading(id="loading-pdf-logs", type="default", children=[
+                dbc.Button("Gerar PDF Logs", id='btn-pdf-logs', color="success", className="me-2"),
+                dcc.Download(id='download-pdf-logs')]), dbc.Button("Fechar", id='btn-fechar-logs', color="secondary")]),
         ], id='modal-logs', is_open=False, size="lg"),
     ], fluid=True)
     return layout
 
 
-@app.callback(
-    Output('specific-dash-title', 'children'),
-    Input('url-raiz', 'pathname')
-)
+@app.callback(Output('specific-dash-title', 'children'), Input('url-raiz', 'pathname'))
 def update_specific_title(pathname):
-    if not pathname.startswith('/ponto/'):
-        return dash.no_update
+    if not pathname.startswith('/ponto/'): return dash.no_update
     try:
-        id_ponto = pathname.split('/')[-1]
-        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto Desconhecido"})
+        id_ponto = pathname.split('/')[-1];
+        config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Desconhecido"})
         return html.H3(f"Estação {config['nome']}", style={'color': '#000000', 'font-weight': 'bold'})
     except Exception:
         return html.H3("Detalhes da Estação", style={'color': '#000000', 'font-weight': 'bold'})
 
 
-@app.callback(
-    Output('specific-dash-cards', 'children'),
-    [Input('url-raiz', 'pathname'),
-     Input('store-ultimo-status', 'data')]
-)
+@app.callback(Output('specific-dash-cards', 'children'),
+              [Input('url-raiz', 'pathname'), Input('store-ultimo-status', 'data')])
 def update_specific_cards(pathname, status_json):
-    if not status_json or not pathname.startswith('/ponto/'):
-        return dbc.Spinner(size="lg")
-
+    if not status_json or not pathname.startswith('/ponto/'): return dbc.Spinner(size="lg")
     id_ponto = pathname.split('/')[-1]
-    if id_ponto not in PONTOS_DE_ANALISE:
-        return dbc.Alert("Ponto não encontrado.", color="danger")
-
-    status_info = status_json.get(id_ponto, {})
-    if not isinstance(status_info, dict):
-        status_info = {}
-
-    status_geral_ponto_txt = status_info.get('status', 'INDEFINIDO')
-    ultima_chuva_72h = status_info.get('chuva_72h', 0.0)
-    umidade_1m = status_info.get('umidade_1m')
-    umidade_2m = status_info.get('umidade_2m')
+    if id_ponto not in PONTOS_DE_ANALISE: return dbc.Alert("Ponto não encontrado.", color="danger")
+    status_info = status_json.get(id_ponto, {}) if isinstance(status_json.get(id_ponto), dict) else {}
+    status_geral_texto, _, card_class_color = STATUS_MAP_HIERARQUICO.get(
+        RISCO_MAP.get(status_info.get('status', 'INDEFINIDO'), -1), ("INDEFINIDO", "secondary", "bg-secondary"))
+    umidade_1m = status_info.get('umidade_1m');
+    umidade_2m = status_info.get('umidade_2m');
     umidade_3m = status_info.get('umidade_3m')
-
-    risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
-    status_geral_texto, _, card_class_color = STATUS_MAP_HIERARQUICO.get(risco_geral,
-                                                                         ("INDEFINIDO", "secondary", "bg-secondary"))
-
-    css_color_s1 = CORES_UMIDADE['1m'] if umidade_1m and (
+    css_s1 = CORES_UMIDADE['1m'] if umidade_1m and (
                 umidade_1m - CONSTANTES_PADRAO['UMIDADE_BASE_1M']) >= DELTA_TRIGGER_UMIDADE else 'green'
-    css_color_s2 = CORES_UMIDADE['2m'] if umidade_2m and (
+    css_s2 = CORES_UMIDADE['2m'] if umidade_2m and (
                 umidade_2m - CONSTANTES_PADRAO['UMIDADE_BASE_2M']) >= DELTA_TRIGGER_UMIDADE else 'green'
-    css_color_s3 = CORES_UMIDADE['3m'] if umidade_3m and (
+    css_s3 = CORES_UMIDADE['3m'] if umidade_3m and (
                 umidade_3m - CONSTANTES_PADRAO['UMIDADE_BASE_3M']) >= DELTA_TRIGGER_UMIDADE else 'green'
-
     layout_cards = [
         dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Atual"), html.P(status_geral_texto, className="fs-3 fw-bold")]),
                          className=f"shadow h-100 {card_class_color}"), xs=12, md=4, className="mb-4"),
-        dbc.Col(dbc.Card(
-            dbc.CardBody([html.H5("Chuva 72h"), html.P(f"{ultima_chuva_72h:.1f} mm", className="fs-3 fw-bold")]),
-            className="shadow h-100 bg-white"), xs=12, md=4, className="mb-4"),
+        dbc.Col(dbc.Card(dbc.CardBody(
+            [html.H5("Chuva 72h"), html.P(f"{status_info.get('chuva_72h', 0.0):.1f} mm", className="fs-3 fw-bold")]),
+                         className="shadow h-100 bg-white"), xs=12, md=4, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody([html.H5("Umidade do Solo (%)"), dbc.Row([
-            dbc.Col(html.P(
-                [html.Span(f"{umidade_1m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_color_s1}),
-                 html.Span(" (1m)", className="small")], className="mb-0 text-center"), width=4),
-            dbc.Col(html.P(
-                [html.Span(f"{umidade_2m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_color_s2}),
-                 html.Span(" (2m)", className="small")], className="mb-0 text-center"), width=4),
-            dbc.Col(html.P(
-                [html.Span(f"{umidade_3m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_color_s3}),
-                 html.Span(" (3m)", className="small")], className="mb-0 text-center"), width=4),
+            dbc.Col(html.P([html.Span(f"{umidade_1m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_s1}),
+                            html.Span(" (1m)", className="small")], className="mb-0 text-center"), width=4),
+            dbc.Col(html.P([html.Span(f"{umidade_2m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_s2}),
+                            html.Span(" (2m)", className="small")], className="mb-0 text-center"), width=4),
+            dbc.Col(html.P([html.Span(f"{umidade_3m or 0.0:.1f}", className="fs-3 fw-bold", style={'color': css_s3}),
+                            html.Span(" (3m)", className="small")], className="mb-0 text-center"), width=4),
         ])]), className="shadow h-100 bg-white"), xs=12, md=4, className="mb-4"),
     ]
     return layout_cards
 
 
-@app.callback(
-    [Output('specific-dash-graphs', 'children'),
-     Output('store-id-ponto-ativo', 'data')],
-    [Input('intervalo-atualizacao-dados', 'n_intervals'),
-     Input('url-raiz', 'pathname'),
-     Input('graph-time-selector', 'value')]
-)
+@app.callback([Output('specific-dash-graphs', 'children'), Output('store-id-ponto-ativo', 'data')],
+              [Input('intervalo-atualizacao-dados', 'n_intervals'), Input('url-raiz', 'pathname'),
+               Input('graph-time-selector', 'value')])
 def update_specific_graphs(n_intervals, pathname, selected_hours):
-    if not pathname.startswith('/ponto/') or selected_hours is None:
-        return dash.no_update, dash.no_update
-
-    id_ponto = pathname.split('/')[-1]
+    if not pathname.startswith('/ponto/') or selected_hours is None: return dash.no_update, dash.no_update
+    id_ponto = pathname.split('/')[-1];
     config = PONTOS_DE_ANALISE.get(id_ponto)
-    if not config:
-        return dbc.Alert("Ponto não encontrado.", color="danger"), id_ponto
-
+    if not config: return dbc.Alert("Ponto não encontrado.", color="danger"), id_ponto
     df_completo = data_source.read_data_from_sqlite(last_hours=100)
-
     try:
-        if df_completo.empty or 'timestamp' not in df_completo.columns:
-            return dbc.Alert("Dados históricos indisponíveis no momento.", color="warning"), id_ponto
-
-        df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp'])
-        if df_completo['timestamp'].dt.tz is None:
-            df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
+        if df_completo.empty or 'timestamp' not in df_completo.columns: return dbc.Alert("Dados indisponíveis.",
+                                                                                         color="warning"), id_ponto
+        df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp']);
+        if df_completo['timestamp'].dt.tz is None: df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize(
+            'UTC')
         df_completo['timestamp_local'] = df_completo['timestamp'].dt.tz_convert('America/Sao_Paulo')
-
-        numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
-        for col in numeric_cols:
-            df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
-
+        for col in ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']: df_completo[
+            col] = pd.to_numeric(df_completo[col], errors='coerce')
     except Exception as e:
-        return dbc.Alert(f"Erro ao processar dados: {e}", color="danger"), id_ponto
+        return dbc.Alert(f"Erro processamento: {e}", color="danger"), id_ponto
 
     df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
-    if df_ponto.empty:
-        return dbc.Alert("Sem dados históricos para este ponto.", color="warning"), id_ponto
+    if df_ponto.empty: return dbc.Alert("Sem dados para este ponto.", color="warning"), id_ponto
 
     df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
+
+    # --- PREENCHIMENTO DE BURACOS (FFILL) ---
+    # Garante que a linha do gráfico seja contínua
     umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
     df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
@@ -227,6 +176,8 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
         df_plot_10min = df_ponto_plot.set_index('timestamp_local').resample('10T').agg({
             'chuva_mm': 'sum', 'umidade_1m_perc': 'last', 'umidade_2m_perc': 'last', 'umidade_3m_perc': 'last'
         }).reset_index()
+        # Aplica ffill novamente após o resample para garantir que buracos de 10min sejam preenchidos
+        df_plot_10min[umidade_cols] = df_plot_10min[umidade_cols].ffill()
     else:
         df_plot_10min = pd.DataFrame(
             columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
@@ -235,75 +186,55 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
         df_chuva_FILTRO_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
     df_chuva_72h_plot = df_chuva_72h_completo[
         df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
-
     for df in [df_chuva_FILTRO_plot, df_chuva_72h_plot]:
-        if 'timestamp' in df.columns:
-            df.loc[:, 'timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        if 'timestamp' in df.columns: df['timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
-    fig_chuva.add_trace(
-        go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_mm'], name='Pluv. 10 min (mm)',
-               marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+    fig_chuva.add_trace(go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_mm'], name='Pluv. (mm)',
+                               marker_color='#2C3E50', opacity=0.8), secondary_y=False)
     fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'],
-                                   name=f'Acumulada ({selected_hours}h)', mode='lines',
+                                   name=f'Acum. ({selected_hours}h)', mode='lines',
                                    line=dict(color='#007BFF', width=2.5)), secondary_y=True)
     fig_chuva.add_trace(
-        go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
+        go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acum. (72h)',
                    mode='lines', line=dict(color='green', width=2, dash='dot'), visible='legendonly'), secondary_y=True)
-    fig_chuva.update_layout(title_text=f"Pluviometria - Estação {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
-                            margin=dict(l=40, r=20, t=50, b=80),
-                            legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
-                            xaxis_title="Data e Hora", yaxis_title="Pluviometria (mm/10min)",
+    fig_chuva.update_layout(title_text=f"Pluviometria - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
+                            margin=dict(l=40, r=20, t=50, b=80), legend=dict(orientation="h", y=-0.5, x=0.5),
+                            xaxis_title="Data e Hora", yaxis_title="mm/10min",
                             yaxis2_title=f"Acumulada ({selected_hours}h)", hovermode="x unified")
 
     fig_umidade = go.Figure()
     fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_1m_perc'], name='Umidade 1m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
+        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_1m_perc'], name='1m', mode='lines',
+                   line=dict(color=CORES_UMIDADE['1m'], width=3)))
     fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_2m_perc'], name='Umidade 2m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
+        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_2m_perc'], name='2m', mode='lines',
+                   line=dict(color=CORES_UMIDADE['2m'], width=3)))
     fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_3m_perc'], name='Umidade 3m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
+        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_3m_perc'], name='3m', mode='lines',
+                   line=dict(color=CORES_UMIDADE['3m'], width=3)))
 
-    # --- CORREÇÃO: Cálculo do eixo dinâmico com mínimo de 50% ---
     max_val_umidade = df_plot_10min[['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].max().max()
     if pd.isna(max_val_umidade): max_val_umidade = 0
-    range_max = max(50, max_val_umidade * 1.1)  # 10% de margem se passar de 50
+    range_max = max(50, max_val_umidade * 1.1)
 
-    fig_umidade.update_layout(
-        title_text=f"Variação da Umidade do Solo - Estação {config['nome']}",
-        template=TEMPLATE_GRAFICO_MODERNO,
-        margin=dict(l=40, r=20, t=40, b=80),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-        xaxis_title="Data e Hora",
-        yaxis_title="Umidade do Solo (%)",
-        yaxis=dict(range=[0, range_max]),  # Aplica o range calculado
-        hovermode="x unified"
-    )
-
-    layout_graficos = [
+    fig_umidade.update_layout(title_text=f"Umidade do Solo - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
+                              margin=dict(l=40, r=20, t=40, b=80), legend=dict(orientation="h", y=-0.5, x=0.5),
+                              xaxis_title="Data e Hora", yaxis_title="%", yaxis=dict(range=[0, range_max]),
+                              hovermode="x unified")
+    return [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
-                className="mb-4"),
-    ]
-    return layout_graficos, id_ponto
+                className="mb-4")], id_ponto
 
 
-# Callbacks de logs e relatórios
 @app.callback(Output('modal-logs', 'is_open'),
               [Input('btn-ver-logs', 'n_clicks'), Input('btn-fechar-logs', 'n_clicks')],
               [State('modal-logs', 'is_open')], prevent_initial_call=True)
 def toggle_logs_modal(n_open, n_close, is_open):
-    ctx = dash.callback_context
+    ctx = dash.callback_context;
     if not ctx.triggered: return is_open
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    if button_id == 'btn-ver-logs':
-        return not is_open
-    elif button_id == 'btn-fechar-logs':
-        return False
-    return is_open
+    return not is_open if ctx.triggered[0]['prop_id'].split('.')[0] == 'btn-ver-logs' else False
 
 
 @app.callback([Output('modal-logs-content', 'children'), Output('store-logs-filtrados', 'data')],
@@ -316,20 +247,17 @@ def load_logs_content(is_open, id_ponto, logs_json):
         logs_ponto = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
         return html.Pre('\n'.join(reversed(logs_ponto))), logs_ponto
     except Exception:
-        return "Erro ao carregar logs.", []
+        return "Erro logs.", []
 
 
 @app.callback(Output('download-pdf-logs', 'data'), Input('btn-pdf-logs', 'n_clicks'),
               [State('store-id-ponto-ativo', 'data'), State('store-logs-filtrados', 'data')], prevent_initial_call=True)
 def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
-    if not n_clicks or not id_ponto or not logs_filtrados: return dash.no_update
-    config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
-
+    if not n_clicks or not id_ponto: return dash.no_update
+    config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"});
     pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
-    data = pdf_buffer.getvalue()
-    filename = f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
-
-    return dcc.send_bytes(lambda f: f.write(data), filename)
+    return dcc.send_bytes(lambda f: f.write(pdf_buffer.getvalue()),
+                          f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf")
 
 
 @app.callback([Output('pdf-task-id-store', 'data'), Output('pdf-check-interval', 'disabled'),
@@ -337,11 +265,10 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
                Output('btn-excel-especifico', 'disabled')], Input('btn-pdf-especifico', 'n_clicks'),
               [State('pdf-date-picker', 'start_date'), State('pdf-date-picker', 'end_date'),
                State('store-id-ponto-ativo', 'data')], prevent_initial_call=True)
-def trigger_pdf_generation(n_clicks, start_date, end_date, id_ponto):
+def trigger_pdf_generation(n_clicks, start, end, id_ponto):
     if not n_clicks: return dash.no_update, True, dash.no_update, dash.no_update, dash.no_update
-    task_id = str(uuid.uuid4())
-    thread = Thread(target=gerador_pdf.thread_gerar_pdf, args=(task_id, start_date, end_date, id_ponto))
-    thread.start()
+    task_id = str(uuid.uuid4());
+    Thread(target=gerador_pdf.thread_gerar_pdf, args=(task_id, start, end, id_ponto)).start()
     return task_id, False, html.Div([dbc.Spinner(size="sm"), " Gerando PDF..."]), True, True
 
 
@@ -362,8 +289,8 @@ def check_pdf_status(n, task_id):
             return dcc.send_bytes(lambda f: f.write(task["data"]),
                                   task["filename"]), True, None, False, False, False, False
         else:
-            is_no_data = "Sem dados" in task["message"]
-            return dash.no_update, True, None, is_no_data, not is_no_data, False, False
+            return dash.no_update, True, None, "Sem dados" in task["message"], not "Sem dados" in task[
+                "message"], False, False
     return dash.no_update, False, dash.no_update, False, False, dash.no_update, dash.no_update
 
 
@@ -374,11 +301,10 @@ def check_pdf_status(n, task_id):
               Input('btn-excel-especifico', 'n_clicks'),
               [State('pdf-date-picker', 'start_date'), State('pdf-date-picker', 'end_date'),
                State('store-id-ponto-ativo', 'data')], prevent_initial_call=True)
-def trigger_excel_generation(n_clicks, start_date, end_date, id_ponto):
+def trigger_excel_generation(n_clicks, start, end, id_ponto):
     if not n_clicks: return dash.no_update, True, dash.no_update, dash.no_update, dash.no_update
-    task_id = str(uuid.uuid4())
-    thread = Thread(target=gerador_pdf.thread_gerar_excel, args=(task_id, start_date, end_date, id_ponto))
-    thread.start()
+    task_id = str(uuid.uuid4());
+    Thread(target=gerador_pdf.thread_gerar_excel, args=(task_id, start, end, id_ponto)).start()
     return task_id, False, html.Div([dbc.Spinner(size="sm"), " Gerando Excel..."]), True, True
 
 
@@ -401,28 +327,25 @@ def check_excel_status(n, task_id):
             return dcc.send_bytes(lambda f: f.write(task["data"]),
                                   task["filename"]), True, None, False, False, False, False
         else:
-            is_no_data = "Sem dados" in task["message"]
-            return dash.no_update, True, None, is_no_data, not is_no_data, False, False
+            return dash.no_update, True, None, "Sem dados" in task["message"], not "Sem dados" in task[
+                "message"], False, False
     return dash.no_update, False, dash.no_update, False, False, dash.no_update, dash.no_update
 
 
 @app.callback(Output('dynamic-accumulated-output', 'children'),
               [Input('graph-time-selector', 'value'), Input('store-dados-sessao', 'data'),
                Input('url-raiz', 'pathname')])
-def update_dynamic_accumulated_text(selected_hours, dados_json, pathname):
-    if selected_hours == 72 or not dados_json or not pathname.startswith('/ponto/'): return None
+def update_dynamic_accumulated_text(hours, dados_json, pathname):
+    if hours == 72 or not dados_json or not pathname.startswith('/ponto/'): return None
     try:
-        id_ponto = pathname.split('/')[-1]
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
+        id_ponto = pathname.split('/')[-1];
+        df_completo = pd.read_json(StringIO(dados_json), orient='split');
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
         if df_ponto.empty: return None
-        df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
-        df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
-        df_acumulado = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
-        if df_acumulado.empty: return None
-        valor_acumulado = df_acumulado.iloc[-1]['chuva_mm']
-        if pd.isna(valor_acumulado): return None
-        return html.P(f"Acumulado ({selected_hours}h): {valor_acumulado:.1f} mm", className="mb-0 ms-3",
+        df_ponto['timestamp'] = pd.to_datetime(df_ponto['timestamp']);
+        df_ponto['chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
+        df_acum = processamento.calcular_acumulado_rolling(df_ponto, horas=hours)
+        return html.P(f"Acumulado ({hours}h): {df_acum.iloc[-1]['chuva_mm']:.1f} mm", className="mb-0 ms-3",
                       style={'fontSize': '0.85rem', 'fontWeight': 'bold', 'color': '#555'})
     except Exception:
         return None
