@@ -68,7 +68,7 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto):
 
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 10, "Registros Consolidados (a cada 15 minutos)", ln=True, align="L")
+    pdf.cell(0, 10, "Registros Consolidados (a cada 10 minutos)", ln=True, align="L")
     df_tabela = df_consolidado.tail(40).copy()
     df_tabela['timestamp_local'] = df_tabela['timestamp_local'].dt.strftime('%d/%m/%y %H:%M')
     col_widths = [35, 35, 35, 35, 35]
@@ -113,16 +113,16 @@ def _criar_graficos_pdf(df_consolidado, nome_ponto):
     # --- GRÁFICO DE CHUVA (LÓGICA CORRIGIDA E LOCAL) ---
     fig_chuva, ax1 = plt.subplots(figsize=(10, 5))
     ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#5F6B7C', alpha=0.8,
-            label='Pluv. (mm/15min)', width=1 / 96)
+            label='Pluv. (mm/10min)', width=1 / (96 * 1.5)) # Ajuste de largura
     ax1.set_xlabel("Data e Hora")
-    ax1.set_ylabel("Pluviometria (mm/15min)", color='#2C3E50')
+    ax1.set_ylabel("Pluviometria (mm/10min)", color='#2C3E50')
     ax1.tick_params(axis='x', rotation=45, labelsize=8)
     ax1.grid(True, linestyle='--', alpha=0.6)
 
     ax2 = ax1.twinx()
     # CORREÇÃO: Cálculo do acumulado feito localmente, de forma segura.
-    # A janela é 72h * 4 (intervalos de 15min por hora) = 288
-    df_consolidado['chuva_acum_72h'] = df_consolidado['chuva_mm'].rolling(window=288, min_periods=1).sum()
+    # A janela é 72h * 6 (intervalos de 10min por hora) = 432
+    df_consolidado['chuva_acum_72h'] = df_consolidado['chuva_mm'].rolling(window=432, min_periods=1).sum()
     ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_72h'], color='#007BFF', linewidth=2.5,
              label='Acumulada (72h)')
     ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
@@ -175,8 +175,8 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
     # 2. Converte o timestamp para o fuso horário local (necessário para o resample)
     df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-    # 3. Agrega os dados (Reamostragem em 15 minutos)
-    df_consolidado = df_brutos.set_index('timestamp_local').resample('15T').agg({
+    # 3. Agrega os dados (Reamostragem em 10 minutos)
+    df_consolidado = df_brutos.set_index('timestamp_local').resample('10T').agg({
         'chuva_mm': 'sum',
         'umidade_1m_perc': 'mean',
         'umidade_2m_perc': 'mean',
@@ -202,13 +202,19 @@ def thread_gerar_excel(task_id, start_date, end_date, id_ponto):
             EXCEL_CACHE[task_id] = {"status": "erro", "message": str(e)}
 
 
-def thread_gerar_pdf(task_id, start_date, end_date, id_ponto, status_json):
+def thread_gerar_pdf(task_id, start_date, end_date, id_ponto):
     try:
         df_consolidado = _get_and_consolidate_data(start_date, end_date, id_ponto)
         if df_consolidado.empty: raise Exception("Sem dados no período selecionado.")
         periodo_str = f"{pd.to_datetime(start_date).strftime('%d/%m/%Y')} a {pd.to_datetime(end_date).strftime('%d/%m/%Y')}"
         nome_ponto = PONTOS_DE_ANALISE.get(id_ponto, {}).get("nome", "Desconhecido")
-        status_texto = status_json.get(id_ponto, "INDEFINIDO")
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        status_json = data_source.get_status_from_disk()
+        status_info = status_json.get(id_ponto, {})
+        status_texto = status_info.get('status', 'INDEFINIDO') if isinstance(status_info, dict) else status_info
+        # --- FIM DA CORREÇÃO ---
+
         risco = RISCO_MAP.get(status_texto, -1)
         _, status_cor, _ = STATUS_MAP_HIERARQUICO.get(risco, ("INDEFINIDO", "secondary", "bg-secondary"))
         pdf_buffer = criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto)

@@ -64,7 +64,7 @@ DB_TABLE_NAME = "historico_monitoramento"
 
 
 # --- Configurações do Worker ---
-FREQUENCIA_API_SEGUNDOS = 60 * 15
+FREQUENCIA_API_SEGUNDOS = 60 * 10
 MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS
 
 # --- Configurações dos Pontos de Análise ---

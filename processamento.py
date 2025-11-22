@@ -42,8 +42,8 @@ def calcular_acumulado_rolling(df_ponto, horas=72):
 
         # 2. Define uma função interna para processar uma Série
         def calcular_rolling_para_serie(serie_chuva):
-            # Resample para 15T para preencher buracos
-            df_resampled = serie_chuva.resample('15T').sum()
+            # Resample para 10T para preencher buracos
+            df_resampled = serie_chuva.resample('10T').sum()
             df_resampled = df_resampled.fillna(0)
             # Calcula o rolling
             acumulado = df_resampled.rolling(window=window_size, min_periods=1).sum()
