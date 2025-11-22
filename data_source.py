@@ -220,7 +220,13 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
     if conditions: query_base += " WHERE " + " AND ".join(conditions)
     query_base += " ORDER BY timestamp ASC"
     try:
-        df = pd.read_sql_query(query_base, DB_ENGINE, params=params, parse_dates=["timestamp"])
+        # --- AQUI ESTÁ A CORREÇÃO FINAL DE LEITURA (WAL PASSIVO) ---
+        with DB_ENGINE.connect() as connection:
+            # PRAGMA PASSIVO antes de ler garante que o processo Reader veja as mudanças do Writer
+            connection.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
+            df = pd.read_sql_query(query_base, connection, params=params, parse_dates=["timestamp"])
+        # -----------------------------------------------------------
+
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
