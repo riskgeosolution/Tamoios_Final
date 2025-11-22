@@ -170,7 +170,7 @@ def initialize_database():
 
 
 def save_to_sqlite(df_novos_dados):
-    """ Salva dados e FORÇA o checkpoint para garantir leitura imediata. """
+    """ Salva dados sem forçar o checkpoint TRUNCATE, evitando locks. """
     global DB_ENGINE
     if df_novos_dados.empty: return
     try:
@@ -182,14 +182,11 @@ def save_to_sqlite(df_novos_dados):
 
         adicionar_log("DB", f"Salvando {len(df_para_salvar)} linhas no banco de dados.")
 
-        # --- CORREÇÃO CRÍTICA: Usar conexão explícita para forçar CHECKPOINT ---
+        # Usamos conexão explícita e commit para garantir a escrita.
         with DB_ENGINE.connect() as connection:
             df_para_salvar.to_sql(DB_TABLE_NAME, connection, if_exists='append', index=False)
-
-            # Força o SQLite a mover dados do WAL para o DB principal AGORA
-            connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            # !!! REMOVIDO: connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
             connection.commit()
-            # -------------------------------------------------------------------
 
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
@@ -199,6 +196,7 @@ def save_to_sqlite(df_novos_dados):
 
 
 def delete_from_sqlite(timestamps):
+    """ Deleta linhas sem forçar o checkpoint TRUNCATE. """
     global DB_ENGINE
     if not timestamps: return
     try:
@@ -209,9 +207,9 @@ def delete_from_sqlite(timestamps):
             adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.")
             connection.execute(stmt)
 
-            # Força checkpoint aqui também para garantir limpeza imediata
-            connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            # !!! REMOVIDO: connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
             connection.commit()
+
     except Exception as e:
         adicionar_log("DB", f"ERRO CRÍTICO Deletar SQLite: {e}", level="ERROR")
         traceback.print_exc()
