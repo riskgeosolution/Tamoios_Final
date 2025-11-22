@@ -107,14 +107,14 @@ def setup_disk_paths():
     print(f"DEBUG: setup_disk_paths - DB_CONNECTION_STRING: {DB_CONNECTION_STRING}")
 
     if DB_ENGINE is None:
-        # Cria o engine com NullPool (evita cache de conexão)
+        # Cria o engine
         DB_ENGINE = create_engine(
             DB_CONNECTION_STRING,
             connect_args={"timeout": 30, "check_same_thread": False},
             poolclass=NullPool
         )
 
-        # Ativa o modo WAL (Write-Ahead Logging) para concorrência
+        # Ativa o modo WAL e NORMAL sync para balancear segurança e performance
         @event.listens_for(DB_ENGINE, "connect")
         def set_sqlite_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
@@ -131,10 +131,7 @@ def setup_disk_paths():
 
 def initialize_database():
     global DB_ENGINE
-    if DB_ENGINE is None:
-        # Fallback de segurança se setup_disk_paths não tiver sido chamado
-        setup_disk_paths()
-
+    if DB_ENGINE is None: setup_disk_paths()
     try:
         with DB_ENGINE.connect() as connection:
             pass
@@ -173,6 +170,7 @@ def initialize_database():
 
 
 def save_to_sqlite(df_novos_dados):
+    """ Salva dados e FORÇA o checkpoint para garantir leitura imediata. """
     global DB_ENGINE
     if df_novos_dados.empty: return
     try:
@@ -181,8 +179,18 @@ def save_to_sqlite(df_novos_dados):
             df_para_salvar['timestamp'] = pd.to_datetime(df_para_salvar['timestamp'], utc=True)
         colunas_para_salvar = [col for col in COLUNAS_HISTORICO if col in df_para_salvar.columns]
         df_para_salvar = df_para_salvar[colunas_para_salvar]
+
         adicionar_log("DB", f"Salvando {len(df_para_salvar)} linhas no banco de dados.")
-        df_para_salvar.to_sql(DB_TABLE_NAME, DB_ENGINE, if_exists='append', index=False)
+
+        # --- CORREÇÃO CRÍTICA: Usar conexão explícita para forçar CHECKPOINT ---
+        with DB_ENGINE.connect() as connection:
+            df_para_salvar.to_sql(DB_TABLE_NAME, connection, if_exists='append', index=False)
+
+            # Força o SQLite a mover dados do WAL para o DB principal AGORA
+            connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            connection.commit()
+            # -------------------------------------------------------------------
+
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
             adicionar_log("DB", "Aviso: Dados duplicados ignorados.", level="WARN")
@@ -200,6 +208,9 @@ def delete_from_sqlite(timestamps):
             stmt = delete(t_historico).where(t_historico.c.timestamp.in_(ts_strings))
             adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.")
             connection.execute(stmt)
+
+            # Força checkpoint aqui também para garantir limpeza imediata
+            connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
             connection.commit()
     except Exception as e:
         adicionar_log("DB", f"ERRO CRÍTICO Deletar SQLite: {e}", level="ERROR")
@@ -221,11 +232,10 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            # --- LOG DIAGNÓSTICO PARA O RENDER ---
-            if id_ponto:  # Só loga se for uma consulta específica, para não poluir demais
-                ultimo_dado = df['timestamp'].max()
-                print(f"🔍 [DEBUG LEITURA] Ponto: {id_ponto} | Último Dado Lido: {ultimo_dado}")
-            # -------------------------------------
+            # LOG DIAGNÓSTICO (Temporário para validação)
+            if id_ponto:
+                ultimo = df['timestamp'].max()
+                print(f"🔍 [DEBUG LEITURA] Ponto: {id_ponto} | Linhas: {len(df)} | Último: {ultimo}")
 
         return df
     except Exception as e:
