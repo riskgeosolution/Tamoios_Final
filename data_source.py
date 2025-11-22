@@ -182,10 +182,8 @@ def save_to_sqlite(df_novos_dados):
 
         adicionar_log("DB", f"Salvando {len(df_para_salvar)} linhas no banco de dados.")
 
-        # Usamos conexão explícita e commit para garantir a escrita.
         with DB_ENGINE.connect() as connection:
             df_para_salvar.to_sql(DB_TABLE_NAME, connection, if_exists='append', index=False)
-            # !!! REMOVIDO: connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
             connection.commit()
 
     except Exception as e:
@@ -196,7 +194,6 @@ def save_to_sqlite(df_novos_dados):
 
 
 def delete_from_sqlite(timestamps):
-    """ Deleta linhas sem forçar o checkpoint TRUNCATE. """
     global DB_ENGINE
     if not timestamps: return
     try:
@@ -206,10 +203,7 @@ def delete_from_sqlite(timestamps):
             stmt = delete(t_historico).where(t_historico.c.timestamp.in_(ts_strings))
             adicionar_log("DB", f"Deletando {len(ts_strings)} registros antigos.")
             connection.execute(stmt)
-
-            # !!! REMOVIDO: connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
             connection.commit()
-
     except Exception as e:
         adicionar_log("DB", f"ERRO CRÍTICO Deletar SQLite: {e}", level="ERROR")
         traceback.print_exc()
@@ -230,10 +224,10 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            # LOG DIAGNÓSTICO (Temporário para validação)
-            if id_ponto:
-                ultimo = df['timestamp'].max()
-                print(f"🔍 [DEBUG LEITURA] Ponto: {id_ponto} | Linhas: {len(df)} | Último: {ultimo}")
+            # --- CORREÇÃO DE LOG: Imprime sempre no update do store ---
+            ultimo = df['timestamp'].max()
+            ponto_log = id_ponto if id_ponto else 'GLOBAL'
+            print(f"🔍 [DEBUG LEITURA] Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}")
 
         return df
     except Exception as e:
@@ -341,7 +335,7 @@ def fetch_data_from_zentra_cloud():
                     if ts_iso and value is not None:
                         ts_arr = arredondar_timestamp_10min(datetime.datetime.fromisoformat(ts_iso).timestamp())
                         if ts_arr not in dados_por_timestamp: dados_por_timestamp[ts_arr] = {}
-                        dados_por_timestamp[ts_arr][coluna] = float(value) * 100.0
+                        dados[ts_arr][coluna] = float(value) * 100.0
         if not dados_por_timestamp: return pd.DataFrame()
         df_bloco = pd.DataFrame(
             [{'timestamp': ts, 'id_ponto': ID_PONTO_ZENTRA_KM72, **v} for ts, v in dados_por_timestamp.items()])
