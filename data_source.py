@@ -12,8 +12,9 @@ import time
 from sqlalchemy import create_engine, inspect, text, bindparam, delete, table, column
 from httpx import HTTPStatusError
 import threading
-from sqlalchemy.pool import NullPool
-from sqlalchemy import event
+
+# Importações de Pool e Eventos foram removidas se não estivessem sendo usadas ativamente.
+# Mantendo a estrutura mais limpa.
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -104,9 +105,12 @@ def setup_disk_paths():
 
     if DB_ENGINE is None:
 
+        # --- CORREÇÃO DE ARGUMENTOS DE CONEXÃO ---
         if is_sqlite:
+            # SQLite: Requer check_same_thread=False
             connect_args = {"check_same_thread": False, "timeout": 30}
         else:
+            # Postgres: Requer connect_timeout (timeout genérico é inválido)
             connect_args = {"connect_timeout": 30}
 
         DB_ENGINE = create_engine(
@@ -197,15 +201,14 @@ def delete_from_sqlite(timestamps):
 
 
 def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
-    """ Lê dados usando o Engine global. """
+    """ Lê dados usando o Engine global (Postgres ou SQLite). """
     global DB_ENGINE
 
     query_base = f"SELECT * FROM {DB_TABLE_NAME}"
 
-    # --- CORREÇÃO AQUI ---
+    # CORREÇÃO 2: Inicialização de params como dicionário
     conditions = []
-    params = {}  # Inicializado como dicionário
-    # ---------------------
+    params = {}
 
     if last_hours: start_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=last_hours)
     if id_ponto: conditions.append("id_ponto = :ponto"); params["ponto"] = id_ponto
@@ -218,7 +221,8 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
     df = pd.DataFrame()
     try:
         with DB_ENGINE.connect() as connection:
-            df = pd.read_sql_query(query_base, connection, params=params, parse_dates=["timestamp"])
+            # CORREÇÃO 3: Uso de text() para compatibilidade com bind parameters do Postgres
+            df = pd.read_sql_query(text(query_base), connection, params=params, parse_dates=["timestamp"])
             connection.commit()
 
         if 'timestamp' in df.columns and not df.empty:
