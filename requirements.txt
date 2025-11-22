@@ -8,11 +8,9 @@ fpdf2
 gunicorn
 httpx
 requests
-# --- Novas Bibliotecas Necessárias para Persistência e Ambiente ---
 python-dotenv
 sqlalchemy
 psycopg2-binary
-SQLAlchemy
 openpyxl
 matplotlib
 xlsxwriter
