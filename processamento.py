@@ -1,8 +1,11 @@
-# processamento.py (CORRIGIDO v3: Adicionada função de trava de 6h)
+# processamento.py (CORRIGIDO v4: Eliminação de Dupla Contagem na Chuva)
 
 import pandas as pd
 import datetime
-import traceback  # Importar traceback
+import traceback
+import warnings
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- Importações Corrigidas ---
 from config import (
@@ -16,70 +19,60 @@ from config import (
 def calcular_acumulado_rolling(df_ponto, horas=72):
     """
     Calcula o acumulado 'rolling' somando os valores de chuva incremental (chuva_mm)
-    para um número dinâmico de horas.
-    Esta versão é robusta a buracos nos dados E a múltiplos pontos.
+    para um número dinâmico de horas, corrigindo a duplicação em sensores de 15 minutos.
     """
     if 'chuva_mm' not in df_ponto.columns or df_ponto.empty or 'timestamp' not in df_ponto.columns:
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    # --- CORREÇÃO DEFINITIVA: Garantir que os dados estejam ordenados por tempo ---
-    # Esta é a pré-condição mais importante para qualquer cálculo de janela (rolling).
+    # --- Pré-condição: Garantir que os dados estejam ordenados por tempo ---
     df_ponto = df_ponto.sort_values('timestamp')
-    
+
     df_original = df_ponto.copy()
 
     try:
-        # 1. Garantir que o timestamp é datetime e é o índice
         df_original['timestamp'] = pd.to_datetime(df_original['timestamp'])
         df_original = df_original.set_index('timestamp')
-        df_original['chuva_mm'] = pd.to_numeric(df_original['chuva_mm'], errors='coerce')
-
-        # --- INÍCIO DA ALTERAÇÃO (LÓGICA MAIS ROBUSTA) ---
+        df_original['chuva_mm'] = pd.to_numeric(df_original['chuva_mm'], errors='coerce').fillna(0)
 
         lista_dfs_acumulados = []
-        PONTOS_POR_HORA = 3600 // FREQUENCIA_API_SEGUNDOS
-        window_size = int(horas * PONTOS_POR_HORA)
 
-        # 2. Define uma função interna para processar uma Série
-        def calcular_rolling_para_serie(serie_chuva):
-            # Resample para 10T para preencher buracos
-            df_resampled = serie_chuva.resample('10T').sum()
-            df_resampled = df_resampled.fillna(0)
-            # Calcula o rolling
-            acumulado = df_resampled.rolling(window=window_size, min_periods=1).sum()
-            return acumulado
+        # O Worker roda a cada 10 minutos (FREQUENCIA_API_SEGUNDOS=600)
+        # O Sensor da WeatherLink atualiza a cada 15 minutos.
 
-        # 3. Itera por cada ponto único no DataFrame
+        # Define a janela de rolling em termos de intervalos de 15 minutos
+        window_size_15min = int(horas * (60 / 15))
+
+        # Itera por cada ponto único no DataFrame
         for ponto_id in df_original['id_ponto'].unique():
-            # Pega a Série de chuva apenas para este ponto
-            series_ponto = df_original[df_original['id_ponto'] == ponto_id]['chuva_mm']
+            series_chuva = df_original[df_original['id_ponto'] == ponto_id]['chuva_mm']
 
-            # Calcula o acumulado para esta Série
-            acumulado_series = calcular_rolling_para_serie(series_ponto)
+            # --- CORREÇÃO CRÍTICA PARA DUPLICAÇÃO ---
+            # 1. Resample para 15 minutos, pegando o valor máximo da chuva incremental (max)
+            # Isso garante que a leitura incremental de 15 minutos só seja contada uma vez,
+            # eliminando o double-counting que ocorreria na amostragem de 10 minutos.
+            df_15min = series_chuva.resample('15T').max().fillna(0)
 
-            # Converte a Série de volta para um DataFrame
-            acumulado_df = acumulado_series.to_frame(name='chuva_mm')
+            # 2. Calcula o acumulado com a nova frequência de 15 minutos
+            acumulado_15min = df_15min.rolling(window=window_size_15min, min_periods=1).sum()
 
-            # Adiciona a coluna 'id_ponto' de volta
+            # 3. Volta para a frequência de 10 minutos (10T) para alinhar com o Dashboard
+            # O .ffill() preenche os buracos de 10 minutos com o dado de 15 minutos mais recente.
+            acumulado_10min = acumulado_15min.resample('10T').ffill()
+            # ------------------------------------------
+
+            acumulado_df = acumulado_10min.to_frame(name='chuva_mm')
             acumulado_df['id_ponto'] = ponto_id
 
-            # Adiciona à lista
             lista_dfs_acumulados.append(acumulado_df)
 
-        # 4. Concatena todos os resultados
         df_final = pd.concat(lista_dfs_acumulados)
 
-        # 5. Retorna o DataFrame com as colunas 'timestamp', 'chuva_mm', 'id_ponto'
         return df_final.reset_index()
-        # --- FIM DA ALTERAÇÃO ---
 
     except Exception as e:
         print(f"Erro CRÍTICO ao calcular acumulado rolling: {e}")
         traceback.print_exc()
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
-
-
-# --- FIM DA ALTERAÇÃO ---
 
 
 # --- FUNÇÃO definir_status_chuva (ALTERADA LÓGICA >=) ---
@@ -93,15 +86,12 @@ def definir_status_chuva(chuva_mm):
         if pd.isna(chuva_mm):
             status_texto = "SEM DADOS"
 
-        # --- INÍCIO DA ALTERAÇÃO ---
-        # A lógica agora é >= para PARALIZAÇÃO
         elif chuva_mm >= CHUVA_LIMITE_LARANJA:  # >= 100.0
             status_texto = "PARALIZAÇÃO"
         elif chuva_mm > CHUVA_LIMITE_AMARELO:  # > 79.0
             status_texto = "ALERTA"
         elif chuva_mm > CHUVA_LIMITE_VERDE:  # > 60.0
             status_texto = "ATENÇÃO"
-        # --- FIM DA ALTERAÇÃO ---
 
         else:
             status_texto = "LIVRE"
@@ -166,59 +156,37 @@ def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
         return "grey"
 
 
-# --- INÍCIO DA NOVA FUNÇÃO (TRAVA DE SEGURANÇA DA BASE) ---
+# --- FUNÇÃO verificar_trava_base (Mantida) ---
 def verificar_trava_base(df_historico_ponto, coluna_umidade, nova_leitura, base_antiga, horas=6):
     """
     Verifica se uma nova leitura baixa deve se tornar a nova base,
     exigindo que todas as leituras nas últimas X horas também estejam abaixo da base antiga.
     """
     try:
-        # 1. Se a nova leitura não for um gatilho (não for menor), a base antiga é mantida.
         if nova_leitura >= base_antiga:
-            return base_antiga  # Retorna a base antiga (sem mudança)
+            return base_antiga
 
-        # 2. GATILHO: A nova leitura é menor. Agora, verifique as últimas 6 horas.
-
-        # Pega o timestamp mais recente do histórico
         if df_historico_ponto.empty or 'timestamp' not in df_historico_ponto.columns:
-            # Não há histórico (primeiro run), mas a nova leitura é menor que a base padrão.
-            # Neste caso, devemos assumir que é a nova base (pois não há histórico para verificar).
             print(f"[{coluna_umidade}] Primeiro registro é menor que a base. Definindo nova base: {nova_leitura}")
             return nova_leitura
 
-            # Pega o timestamp mais recente do DF
         ultimo_timestamp_no_df = df_historico_ponto['timestamp'].max()
-        # Define o limite de 6 horas atrás
         limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=horas)
 
-        # Filtra o histórico para as últimas 6 horas (excluindo a nova leitura)
         df_ultimas_horas = df_historico_ponto[df_historico_ponto['timestamp'] >= limite_tempo]
-
-        # Pega a série de dados de umidade, removendo valores nulos (NaN)
         serie_umidade_historica = df_ultimas_horas[coluna_umidade].dropna()
 
-        # 3. Verifica se TODO o histórico recente está abaixo da base antiga
-
         if not serie_umidade_historica.empty:
-            # .all() verifica se TODOS os valores são True
             if not (serie_umidade_historica < base_antiga).all():
-                # Se *qualquer* valor histórico nas últimas 6h for >= à base antiga, a trava falha.
-                # O solo "se recuperou" nesse período, então foi um spike ou evento curto.
                 print(
                     f"[{coluna_umidade}] GATILHO FALHOU: Nova leitura {nova_leitura} é baixa, mas dados nas últimas {horas}h não estavam. Mantendo base {base_antiga}.")
-                return base_antiga  # Retorna a base antiga (sem mudança)
+                return base_antiga
 
-        # 4. Se chegou aqui:
-        # (A) A nova leitura é < base_antiga (verificado no Passo 1)
-        # (B) Todo o histórico das últimas 6h também é < base_antiga (verificado no Passo 3)
-        # A trava de 6 horas foi satisfeita.
         print(
             f"[{coluna_umidade}] GATILHO SUCESSO: Trava de {horas}h satisfeita. Nova base definida: {nova_leitura} (era {base_antiga})")
-        return nova_leitura  # Retorna a nova base!
+        return nova_leitura
 
     except Exception as e:
         print(f"ERRO CRÍTICO (verificar_trava_base) para {coluna_umidade}: {e}")
         traceback.print_exc()
-        # FAIL-SAFE: Em caso de erro, NUNCA mude a base.
         return base_antiga
-# --- FIM DA NOVA FUNÇÃO ---
