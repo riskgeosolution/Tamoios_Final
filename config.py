@@ -53,18 +53,20 @@ ID_PONTO_ZENTRA_KM72 = "Ponto-B-KM72"
 
 # --- CONFIGURAÇÕES DE DISPARO INTELIGENTE (RENDER KEEPALIVE) ---
 BACKFILL_RUN_TIME_SEC = 20 # Tempo máximo de processamento contínuo para backfill
-RENDER_SLEEP_TIME_SEC = 30 # Tempo de pausa para evitar timeout no Render
+RENDER_SLEEP_TIME_SEC = 30 # Tempo de pausa para evitar timeout no Render na inicialização
 # --- FIM DAS CONFIGURAÇÕES DE DISPARO INTELIGENTE ---
 
 
 # --- CONFIGURAÇÕES DO BANCO DE DADOS ---
+# DATABASE_URL será injetada pelo Render automaticamente se estiver configurada no Environment
 DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
 DB_TABLE_NAME = "historico_monitoramento"
 # --- FIM DA CONFIGURAÇÃO DB ---
 
 
 # --- Configurações do Worker ---
-FREQUENCIA_API_SEGUNDOS = 60 * 10
+# ALTERADO PARA 5 MINUTOS PARA CAPTURAR MELHOR A CHUVA (15 MIN SENSOR)
+FREQUENCIA_API_SEGUNDOS = 60 * 5
 MAX_HISTORICO_PONTOS = (72 * 60 * 60) // FREQUENCIA_API_SEGUNDOS
 
 # --- Configurações dos Pontos de Análise ---
