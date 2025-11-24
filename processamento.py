@@ -1,55 +1,61 @@
 # processamento_saas.py
-# Versão Otimizada: Redução de consumo de memória em cálculos de rolling.
+# Versão Corrigida: Otimização de Memória + Deduplicação de Dados (Corrige soma excessiva de chuva)
 
 import pandas as pd
 import traceback
 
 
-# --- FUNÇÃO calcular_acumulado_rolling (Otimizada) ---
+# --- FUNÇÃO calcular_acumulado_rolling (Corrigida) ---
 def calcular_acumulado_rolling(df_ponto, frequencia_segundos=900, horas=72):
     """
-    Calcula o acumulado 'rolling' de forma mais eficiente em termos de memória.
+    Calcula o acumulado 'rolling' removendo duplicatas antes de somar.
     """
     if df_ponto.empty or 'timestamp' not in df_ponto.columns:
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    # 1. Garante que só trabalhamos com as colunas essenciais
+    # 1. Seleciona colunas essenciais
     df_process = df_ponto[['timestamp', 'chuva_mm', 'id_ponto']].copy()
 
-    # 2. Garante ID para o loop (se ausente)
+    # 2. Garante ID e Tipos
     if 'id_ponto' not in df_process.columns:
         df_process['id_ponto'] = 1
 
-    # 3. Limpeza de tipos e indexação
     try:
         df_process['timestamp'] = pd.to_datetime(df_process['timestamp'])
-        df_process = df_process.set_index('timestamp')
         df_process['chuva_mm'] = df_process['chuva_mm'].fillna(0.0).astype(float)
     except Exception as e:
         print(f"Erro de tipo/indexação: {e}")
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
+    # 3. DEDUPLICAÇÃO (O Passo que faltava!)
+    # Remove registros com o mesmo timestamp para o mesmo ponto, mantendo o maior valor (ou o primeiro)
+    # Isso evita que o resample some o mesmo dado duas vezes.
+    df_process = df_process.sort_values('chuva_mm', ascending=False).drop_duplicates(subset=['id_ponto', 'timestamp'],
+                                                                                     keep='first')
+
+    # 4. Indexação
+    df_process = df_process.set_index('timestamp').sort_index()
+
     lista_dfs_acumulados = []
 
-    # 4. Cálculo da Janela
     pontos_por_hora = 3600 // frequencia_segundos
     window_size = int(horas * pontos_por_hora)
 
     for ponto_id in df_process['id_ponto'].unique():
-        # Filtra os dados, mas evita cópia completa desnecessária
+        # Filtra série
         series_chuva = df_process[df_process['id_ponto'] == ponto_id]['chuva_mm']
 
         if series_chuva.empty: continue
 
-        # Resample para garantir a frequência (Downsampling/Fill)
+        # Resample para garantir frequência (Preenche buracos com 0)
         freq_str = f"{int(frequencia_segundos / 60)}min"
         df_resampled = series_chuva.resample(freq_str).sum()
         df_resampled = df_resampled.fillna(0)
 
-        # 5. Cálculo Rolling (Operação de alta intensidade)
+        # Cálculo Rolling
         acumulado = df_resampled.rolling(window=window_size, min_periods=1).sum()
 
-        # Reconstrói o DataFrame final
+        # Reconstrói DataFrame
         acumulado_df = acumulado.to_frame(name='chuva_mm')
         acumulado_df['id_ponto'] = ponto_id
 
