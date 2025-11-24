@@ -1,4 +1,4 @@
-# processamento.py (CORRIGIDO v5: Centralização de Constantes)
+# processamento.py (CORREÇÃO FINAL v6 - Lógica de Acumulado Simplificada)
 
 import pandas as pd
 import datetime
@@ -7,65 +7,40 @@ import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# --- Importações Corrigidas ---
 from config import (
     CHUVA_LIMITE_VERDE, CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA,
     DELTA_TRIGGER_UMIDADE, RISCO_MAP, STATUS_MAP_HIERARQUICO,
-    FREQUENCIA_API_SEGUNDOS, STATUS_MAP_CHUVA  # Importa o mapa de status de chuva
+    FREQUENCIA_API_SEGUNDOS, STATUS_MAP_CHUVA
 )
 
 
-# --- FUNÇÃO calcular_acumulado_rolling (MODIFICADA E MAIS ROBUSTA) ---
+# --- FUNÇÃO calcular_acumulado_rolling (SIMPLIFICADA E CORRIGIDA) ---
 def calcular_acumulado_rolling(df_ponto, horas=72):
     """
     Calcula o acumulado 'rolling' somando os valores de chuva incremental (chuva_mm)
-    para um número dinâmico de horas, corrigindo a duplicação em sensores de 15 minutos.
+    que já foram previamente tratados na coleta.
+    
+    Esta versão é mais simples e direta, pois a lógica de tratamento de duplicatas
+    foi movida para a etapa de aquisição de dados.
     """
     if 'chuva_mm' not in df_ponto.columns or df_ponto.empty or 'timestamp' not in df_ponto.columns:
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    # --- Pré-condição: Garantir que os dados estejam ordenados por tempo ---
-    df_ponto = df_ponto.sort_values('timestamp')
-
-    df_original = df_ponto.copy()
+    df_ponto = df_ponto.sort_values('timestamp').set_index('timestamp')
 
     try:
-        df_original['timestamp'] = pd.to_datetime(df_original['timestamp'])
-        df_original = df_original.set_index('timestamp')
-        df_original['chuva_mm'] = pd.to_numeric(df_original['chuva_mm'], errors='coerce').fillna(0)
+        # Garante que a coluna de chuva é numérica
+        series_chuva = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
 
-        lista_dfs_acumulados = []
+        # A frequência dos dados é de 10 minutos. A janela de rolling é em número de períodos.
+        # Ex: 72 horas = 72 * 6 períodos de 10 minutos
+        window_size = int(horas * (60 / 10))
 
-        # O Worker roda a cada 10 minutos (FREQUENCIA_API_SEGUNDOS=600)
-        # O Sensor da WeatherLink atualiza a cada 15 minutos.
-
-        # Define a janela de rolling em termos de intervalos de 15 minutos
-        window_size_15min = int(horas * (60 / 15))
-
-        # Itera por cada ponto único no DataFrame
-        for ponto_id in df_original['id_ponto'].unique():
-            series_chuva = df_original[df_original['id_ponto'] == ponto_id]['chuva_mm']
-
-            # --- CORREÇÃO CRÍTICA PARA DUPLICAÇÃO ---
-            # 1. Resample para 15 minutos, pegando o valor máximo da chuva incremental (max)
-            # Isso garante que a leitura incremental de 15 minutos só seja contada uma vez,
-            # eliminando o double-counting que ocorreria na amostragem de 10 minutos.
-            df_15min = series_chuva.resample('15T').max().fillna(0)
-
-            # 2. Calcula o acumulado com a nova frequência de 15 minutos
-            acumulado_15min = df_15min.rolling(window=window_size_15min, min_periods=1).sum()
-
-            # 3. Volta para a frequência de 10 minutos (10T) para alinhar com o Dashboard
-            # O .ffill() preenche os buracos de 10 minutos com o dado de 15 minutos mais recente.
-            acumulado_10min = acumulado_15min.resample('10T').ffill()
-            # ------------------------------------------
-
-            acumulado_df = acumulado_10min.to_frame(name='chuva_mm')
-            acumulado_df['id_ponto'] = ponto_id
-
-            lista_dfs_acumulados.append(acumulado_df)
-
-        df_final = pd.concat(lista_dfs_acumulados)
+        # Calcula o acumulado diretamente sobre os dados incrementais
+        acumulado = series_chuva.rolling(window=window_size, min_periods=1).sum()
+        
+        df_final = acumulado.to_frame(name='chuva_mm')
+        df_final['id_ponto'] = df_ponto['id_ponto']
 
         return df_final.reset_index()
 
@@ -75,7 +50,7 @@ def calcular_acumulado_rolling(df_ponto, horas=72):
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
 
-# --- FUNÇÃO definir_status_chuva (ALTERADA LÓGICA >=) ---
+# --- FUNÇÃO definir_status_chuva (Mantida) ---
 def definir_status_chuva(chuva_mm):
     """
     Define o status da chuva (LIVRE, ATENÇÃO, etc.)
@@ -83,14 +58,12 @@ def definir_status_chuva(chuva_mm):
     try:
         if pd.isna(chuva_mm):
             status_texto = "SEM DADOS"
-
-        elif chuva_mm >= CHUVA_LIMITE_LARANJA:  # >= 100.0
+        elif chuva_mm >= CHUVA_LIMITE_LARANJA:
             status_texto = "PARALIZAÇÃO"
-        elif chuva_mm > CHUVA_LIMITE_AMARELO:  # > 79.0
+        elif chuva_mm > CHUVA_LIMITE_AMARELO:
             status_texto = "ALERTA"
-        elif chuva_mm > CHUVA_LIMITE_VERDE:  # > 60.0
+        elif chuva_mm > CHUVA_LIMITE_VERDE:
             status_texto = "ATENÇÃO"
-
         else:
             status_texto = "LIVRE"
         return status_texto, STATUS_MAP_CHUVA.get(status_texto, "secondary")
