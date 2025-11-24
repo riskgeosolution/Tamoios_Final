@@ -1,4 +1,4 @@
-# index.py (CORREÇÃO FINAL v7 - Correção de Lógica Incremental)
+# index.py (CORREÇÃO FINAL v8 - Persistência de Memória do Worker)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -75,10 +75,12 @@ def worker_main_loop(memoria_worker):
         historico_recente_df = data_source.get_recent_data_for_worker(hours=75)
         status_antigos_do_disco = data_source.get_status_from_disk()
         
-        # --- ALTERAÇÃO: Passa a memória do worker para a função da API ---
-        novos_dados_chuva_df, memoria_worker['ultimo_acumulado_chuva'] = data_source.fetch_data_from_weatherlink_api(
+        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api(
             memoria_worker.get('ultimo_acumulado_chuva', {})
         )
+        # Atualiza a memória do worker com os valores mais recentes
+        memoria_worker['ultimo_acumulado_chuva'] = novos_acumulados_chuva
+
         df_umidade_incremental = data_source.fetch_data_from_zentra_cloud()
 
         df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df], ignore_index=True)
@@ -146,8 +148,24 @@ def background_task_wrapper():
     data_source.adicionar_log("SISTEMA", "Processo Worker (Thread) iniciado.")
     time.sleep(RENDER_SLEEP_TIME_SEC)
     
-    # --- Dicionário para manter o estado entre as execuções do worker ---
+    # --- LÓGICA DE "PRÉ-AQUECIMENTO" DA MEMÓRIA ---
     memoria_worker = {}
+    try:
+        data_source.adicionar_log("WORKER", "Pré-aquecendo memória de acumulados de chuva...")
+        df_historico_completo = data_source.read_data_from_sqlite(last_hours=75)
+        if not df_historico_completo.empty:
+            ultimo_acumulado = {}
+            for id_ponto in PONTOS_DE_ANALISE.keys():
+                df_ponto = df_historico_completo[df_historico_completo['id_ponto'] == id_ponto]
+                if not df_ponto.empty:
+                    ultimo_registro = df_ponto.sort_values('timestamp').iloc[-1]
+                    if pd.notna(ultimo_registro.get('precipitacao_acumulada_mm')):
+                        ultimo_acumulado[id_ponto] = ultimo_registro['precipitacao_acumulada_mm']
+            memoria_worker['ultimo_acumulado_chuva'] = ultimo_acumulado
+            data_source.adicionar_log("WORKER", f"Memória pré-aquecida: {ultimo_acumulado}")
+    except Exception as e:
+        data_source.adicionar_log("WORKER", f"Falha ao pré-aquecer memória: {e}", level="ERROR")
+    # --- FIM DA LÓGICA DE "PRÉ-AQUECIMENTO" ---
 
     INTERVALO_EM_MINUTOS = 10
     CARENCIA_EM_SEGUNDOS = 60
