@@ -1,167 +1,117 @@
-# processamento_saas.py
-# Versão Corrigida: Otimização de Memória + Deduplicação de Dados (Corrige soma excessiva de chuva)
+# processamento.py (VERSÃO FINAL: LÓGICA DE ODÔMETRO/ACUMULADO)
 
 import pandas as pd
+import numpy as np
 import traceback
+import warnings
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+from config import (
+    CHUVA_LIMITE_VERDE, CHUVA_LIMITE_AMARELO, CHUVA_LIMITE_LARANJA,
+    DELTA_TRIGGER_UMIDADE, RISCO_MAP, STATUS_MAP_HIERARQUICO
+)
 
 
-# --- FUNÇÃO calcular_acumulado_rolling (Corrigida) ---
-def calcular_acumulado_rolling(df_ponto, frequencia_segundos=900, horas=72):
+def calcular_acumulado_rolling(df_ponto, horas=72):
     """
-    Calcula o acumulado 'rolling' removendo duplicatas antes de somar.
+    Calcula a chuva real usando a diferença do ACUMULADO DIÁRIO (Odômetro),
+    que é à prova de falhas de coleta e sincronia.
     """
-    if df_ponto.empty or 'timestamp' not in df_ponto.columns:
+    # Validação básica
+    required_cols = ['timestamp', 'id_ponto']
+    if df_ponto.empty or not all(col in df_ponto.columns for col in required_cols):
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    # 1. Seleciona colunas essenciais
-    df_process = df_ponto[['timestamp', 'chuva_mm', 'id_ponto']].copy()
-
-    # 2. Garante ID e Tipos
-    if 'id_ponto' not in df_process.columns:
-        df_process['id_ponto'] = 1
+    df_ponto = df_ponto.sort_values('timestamp')
+    df_original = df_ponto.copy()
 
     try:
-        df_process['timestamp'] = pd.to_datetime(df_process['timestamp'])
-        df_process['chuva_mm'] = df_process['chuva_mm'].fillna(0.0).astype(float)
+        df_original['timestamp'] = pd.to_datetime(df_original['timestamp'])
+        df_original = df_original.set_index('timestamp')
+
+        # Verifica se temos a coluna vital: precipitacao_acumulada_mm
+        if 'precipitacao_acumulada_mm' not in df_original.columns:
+            # Fallback: Se não tiver acumulado, usa a soma simples (legado)
+            df_original['chuva_mm'] = pd.to_numeric(df_original['chuva_mm'], errors='coerce').fillna(0)
+            window_size = int(horas * 6)  # 6 dados por hora (10 min)
+            return df_original['chuva_mm'].rolling(window=window_size, min_periods=1).sum().reset_index()
+
+        # Garante numérico e preenche vazios com o último valor válido (o odômetro não volta)
+        df_original['precipitacao_acumulada_mm'] = pd.to_numeric(df_original['precipitacao_acumulada_mm'],
+                                                                 errors='coerce')
+
+        lista_dfs = []
+
+        for ponto_id in df_original['id_ponto'].unique():
+            df_pt = df_original[df_original['id_ponto'] == ponto_id].copy()
+
+            # 1. Preenche buracos no acumulado (se a net cair, o acumulado do dia se mantém)
+            df_pt['precipitacao_acumulada_mm'] = df_pt['precipitacao_acumulada_mm'].ffill().fillna(0)
+
+            # 2. A MÁGICA: Calcula a chuva real subtraindo o valor atual do anterior (Diferencial)
+            df_pt['chuva_real_incremental'] = df_pt['precipitacao_acumulada_mm'].diff().fillna(0)
+
+            # 3. Correção da Meia-Noite:
+            # Quando vira o dia, o acumulado vai de ex: 20mm para 0mm. O diff dá -20.
+            # Se o diff for negativo, significa que o dia virou. A chuva real é apenas o novo valor.
+            mask_virada_dia = df_pt['chuva_real_incremental'] < 0
+            df_pt.loc[mask_virada_dia, 'chuva_real_incremental'] = df_pt.loc[
+                mask_virada_dia, 'precipitacao_acumulada_mm']
+
+            # 4. Agora temos a chuva exata minuto a minuto. Fazemos a soma Rolling de 72h.
+            # Resample para 10T para garantir a grade temporal correta
+            df_resampled = df_pt['chuva_real_incremental'].resample('10T').sum().fillna(0)
+
+            # Janela de 72h (72 * 6 blocos de 10min = 432)
+            acumulado_rolling = df_resampled.rolling(window=432, min_periods=1).sum()
+
+            temp_df = acumulado_rolling.to_frame(name='chuva_mm')
+            temp_df['id_ponto'] = ponto_id
+            lista_dfs.append(temp_df)
+
+        if not lista_dfs:
+            return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
+
+        return pd.concat(lista_dfs).reset_index()
+
     except Exception as e:
-        print(f"Erro de tipo/indexação: {e}")
+        print(f"Erro CRÍTICO (Cálculo Acumulado): {e}")
+        traceback.print_exc()
         return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
 
-    # 3. DEDUPLICAÇÃO (O Passo que faltava!)
-    # Remove registros com o mesmo timestamp para o mesmo ponto, mantendo o maior valor (ou o primeiro)
-    # Isso evita que o resample some o mesmo dado duas vezes.
-    df_process = df_process.sort_values('chuva_mm', ascending=False).drop_duplicates(subset=['id_ponto', 'timestamp'],
-                                                                                     keep='first')
 
-    # 4. Indexação
-    df_process = df_process.set_index('timestamp').sort_index()
-
-    lista_dfs_acumulados = []
-
-    pontos_por_hora = 3600 // frequencia_segundos
-    window_size = int(horas * pontos_por_hora)
-
-    for ponto_id in df_process['id_ponto'].unique():
-        # Filtra série
-        series_chuva = df_process[df_process['id_ponto'] == ponto_id]['chuva_mm']
-
-        if series_chuva.empty: continue
-
-        # Resample para garantir frequência (Preenche buracos com 0)
-        freq_str = f"{int(frequencia_segundos / 60)}min"
-        df_resampled = series_chuva.resample(freq_str).sum()
-        df_resampled = df_resampled.fillna(0)
-
-        # Cálculo Rolling
-        acumulado = df_resampled.rolling(window=window_size, min_periods=1).sum()
-
-        # Reconstrói DataFrame
-        acumulado_df = acumulado.to_frame(name='chuva_mm')
-        acumulado_df['id_ponto'] = ponto_id
-
-        lista_dfs_acumulados.append(acumulado_df)
-
-    if not lista_dfs_acumulados:
-        return pd.DataFrame(columns=['id_ponto', 'timestamp', 'chuva_mm'])
-
-    df_final = pd.concat(lista_dfs_acumulados)
-    return df_final.reset_index()
-
-
-# --- FUNÇÃO definir_status_chuva ---
-def definir_status_chuva(chuva_mm, regras_chuva=None):
-    if regras_chuva is None:
-        regras_chuva = {}
-
-    STATUS_MAP_CHUVA = {
-        "LIVRE": "success",
-        "ATENÇÃO": "warning",
-        "ALERTA": "orange",
-        "PARALIZAÇÃO": "danger",
-        "SEM DADOS": "secondary",
-        "INDEFINIDO": "secondary"
-    }
-
+def definir_status_chuva(chuva_mm):
+    STATUS_MAP_CHUVA = {"LIVRE": "success", "ATENÇÃO": "warning", "ALERTA": "orange", "PARALIZAÇÃO": "danger",
+                        "SEM DADOS": "secondary", "INDEFINIDO": "secondary"}
     try:
-        if pd.isna(chuva_mm):
-            status_texto = "SEM DADOS"
-
-        elif chuva_mm >= regras_chuva.get('limite_laranja', 100):
-            status_texto = "PARALIZAÇÃO"
-        elif chuva_mm > regras_chuva.get('limite_amarelo', 80):
-            status_texto = "ALERTA"
-        elif chuva_mm > regras_chuva.get('limite_verde', 60):
-            status_texto = "ATENÇÃO"
-        else:
-            status_texto = "LIVRE"
-
-        return status_texto, STATUS_MAP_CHUVA.get(status_texto, "secondary")
-
-    except Exception as e:
-        print(f"Erro status chuva: {e}")
+        if pd.isna(chuva_mm): return "SEM DADOS", "secondary"
+        if chuva_mm >= CHUVA_LIMITE_LARANJA: return "PARALIZAÇÃO", STATUS_MAP_CHUVA["PARALIZAÇÃO"]
+        if chuva_mm > CHUVA_LIMITE_AMARELO: return "ALERTA", STATUS_MAP_CHUVA["ALERTA"]
+        if chuva_mm > CHUVA_LIMITE_VERDE: return "ATENÇÃO", STATUS_MAP_CHUVA["ATENÇÃO"]
+        return "LIVRE", STATUS_MAP_CHUVA["LIVRE"]
+    except:
         return "INDEFINIDO", "secondary"
 
 
-# --- FUNÇÃO definir_status_umidade_hierarquico ---
-def definir_status_umidade_hierarquico(umidade_1m, umidade_2m, umidade_3m,
-                                       base_1m, base_2m, base_3m,
-                                       config_umidade=None):
-    if config_umidade is None:
-        config_umidade = {}
-
-    delta_trigger = config_umidade.get('delta_trigger', 2.0)
-    status_map = config_umidade.get('mapa_risco', {
-        -1: "secondary", 0: "success", 1: "warning", 2: "orange", 3: "danger"
-    })
-
+def definir_status_umidade_hierarquico(umidade_1m, umidade_2m, umidade_3m, base_1m, base_2m, base_3m):
     try:
-        if pd.isna(umidade_1m) or pd.isna(umidade_2m) or pd.isna(umidade_3m) or \
-                pd.isna(base_1m) or pd.isna(base_2m) or pd.isna(base_3m):
-            return status_map.get(-1, "secondary")
+        if pd.isna(umidade_1m) or pd.isna(umidade_2m) or pd.isna(umidade_3m) or pd.isna(base_1m) or pd.isna(
+                base_2m) or pd.isna(base_3m):
+            return STATUS_MAP_HIERARQUICO[-1]  # SEM DADOS
 
-        s1_sim = (umidade_1m - base_1m) >= delta_trigger
-        s2_sim = (umidade_2m - base_2m) >= delta_trigger
-        s3_sim = (umidade_3m - base_3m) >= delta_trigger
+        s1 = (umidade_1m - base_1m) >= DELTA_TRIGGER_UMIDADE
+        s2 = (umidade_2m - base_2m) >= DELTA_TRIGGER_UMIDADE
+        s3 = (umidade_3m - base_3m) >= DELTA_TRIGGER_UMIDADE
 
-        risco_final = 0
+        risco = 0
+        if s1 and s2 and s3:
+            risco = 3
+        elif (s1 and s2 and not s3) or (not s1 and s2 and s3):
+            risco = 2
+        elif (s1 and not s2 and not s3) or (not s1 and not s2 and s3):
+            risco = 1
 
-        if s1_sim and s2_sim and s3_sim:
-            risco_final = 3
-        elif (s1_sim and s2_sim and not s3_sim) or \
-                (not s1_sim and s2_sim and s3_sim):
-            risco_final = 2
-        elif (s1_sim and not s2_sim and not s3_sim) or \
-                (not s1_sim and not s2_sim and s3_sim):
-            risco_final = 1
-
-        return status_map.get(risco_final, "secondary")
-
-    except Exception as e:
-        print(f"Erro ao definir status de umidade solo: {e}")
-        return status_map.get(-1, "secondary")
-
-
-# --- FUNÇÃO verificar_trava_base ---
-def verificar_trava_base(df_historico_ponto, coluna_umidade, nova_leitura, base_antiga, horas=6):
-    try:
-        if nova_leitura >= base_antiga:
-            return base_antiga
-
-        if df_historico_ponto.empty or 'timestamp' not in df_historico_ponto.columns:
-            return nova_leitura
-
-        ultimo_timestamp_no_df = df_historico_ponto['timestamp'].max()
-        limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=horas)
-        df_ultimas_horas = df_historico_ponto[df_historico_ponto['timestamp'] >= limite_tempo]
-        serie_umidade_historica = df_ultimas_horas[coluna_umidade].dropna()
-
-        if not serie_umidade_historica.empty:
-            if not (serie_umidade_historica < base_antiga).all():
-                return base_antiga
-
-        return nova_leitura
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO (verificar_trava_base): {e}")
-        traceback.print_exc()
-        return base_antiga
+        return STATUS_MAP_HIERARQUICO[risco]
+    except:
+        return STATUS_MAP_HIERARQUICO[-1]
