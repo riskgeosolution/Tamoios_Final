@@ -93,7 +93,7 @@ def update_general_dashboard(n_intervals, selected_hours):
         if 'umidade_1m_perc' in df_ponto_plot.columns: agg_dict['umidade_1m_perc'] = 'mean'
         if 'umidade_2m_perc' in df_ponto_plot.columns: agg_dict['umidade_2m_perc'] = 'mean'
         if 'umidade_3m_perc' in df_ponto_plot.columns: agg_dict['umidade_3m_perc'] = 'mean'
-        
+
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg(agg_dict).reset_index()
 
         df_chuva_72h_plot = df_chuva_72h_completo[
