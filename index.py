@@ -1,4 +1,4 @@
-# index.py (CORREÇÃO FINAL v12 - Merge com combine_first)
+# index.py (CORREÇÃO FINAL v13 - Merge com concat + groupby)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -63,25 +63,24 @@ def worker_main_loop(memoria_worker):
         memoria_worker['ultimo_acumulado_chuva'] = novos_acumulados_chuva
         df_umidade_incremental = data_source.fetch_data_from_zentra_cloud()
 
-        # --- LÓGICA DE MERGE SEGURA COM COMBINE_FIRST ---
-        # 1. Garante que não há timestamps nulos e prepara os índices
-        for df in [historico_recente_df, novos_dados_chuva_df, df_umidade_incremental]:
-            if not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-                df.dropna(subset=['timestamp'], inplace=True)
-                df.set_index(['timestamp', 'id_ponto'], inplace=True)
+        # --- LÓGICA DE MERGE SEGURA COM CONCAT E GROUPBY ---
+        # 1. Coloca os dados novos e mais específicos primeiro na concatenação
+        df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df], ignore_index=True)
 
-        # 2. Combina os dataframes, priorizando os dados mais novos.
-        df_mesclado = novos_dados_chuva_df.combine_first(df_umidade_incremental)
-        df_mesclado = df_mesclado.combine_first(historico_recente_df)
-        
-        df_final = df_mesclado.reset_index()
+        # 2. Garante que não há timestamps nulos
+        df_combinado['timestamp'] = pd.to_datetime(df_combinado['timestamp'], errors='coerce')
+        df_combinado.dropna(subset=['timestamp'], inplace=True)
 
-        # 3. Garante os tipos de dados corretos antes de salvar
+        # 3. Garante que colunas numéricas não tenham strings
         numeric_cols = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         for col in numeric_cols:
-            if col in df_final.columns:
-                df_final[col] = pd.to_numeric(df_final[col], errors='coerce')
+            if col in df_combinado.columns:
+                df_combinado[col] = pd.to_numeric(df_combinado[col], errors='coerce')
+
+        # 4. Agrupa e pega o PRIMEIRO valor não-nulo de cada coluna.
+        # Como os dados novos estão no início, eles têm prioridade.
+        agg_funcs = {col: 'first' for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
+        df_final = df_combinado.groupby(['timestamp', 'id_ponto'], as_index=False).agg(agg_funcs)
 
         data_source.upsert_data(df_final)
         historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
