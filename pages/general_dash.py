@@ -1,4 +1,4 @@
-# pages/general_dash.py (VERSÃO FINAL E DEFINITIVA - ESCALA Y AJUSTADA)
+# pages/general_dash.py (CORRIGIDO v2 - Otimização de Memória)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -47,8 +47,10 @@ def update_general_dashboard(n_intervals, selected_hours):
     if selected_hours is None:
         return dbc.Spinner(size="lg", children="Carregando dados...")
 
-    # Busca os dados mais recentes diretamente do banco de dados
-    df_completo = data_source.read_data_from_sqlite(last_hours=100)
+    # --- OTIMIZAÇÃO DE MEMÓRIA ---
+    # Carrega apenas os dados necessários, com uma margem para o cálculo de 72h.
+    horas_para_buscar = max(selected_hours, 73)
+    df_completo = data_source.read_data_from_sqlite(last_hours=horas_para_buscar)
 
     try:
         if df_completo.empty or 'timestamp' not in df_completo.columns:
@@ -61,7 +63,8 @@ def update_general_dashboard(n_intervals, selected_hours):
 
         numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         for col in numeric_cols:
-            df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
+            if col in df_completo.columns:
+                df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
 
     except Exception as e:
         return dbc.Alert(f"Erro ao processar dados: {e}", color="danger")
@@ -74,7 +77,8 @@ def update_general_dashboard(n_intervals, selected_hours):
         df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
 
         umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
-        df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
+        if all(c in df_ponto.columns for c in umidade_cols):
+            df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
         df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
         df_chuva_periodo_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
@@ -85,9 +89,12 @@ def update_general_dashboard(n_intervals, selected_hours):
 
         if df_ponto_plot.empty: continue
 
-        df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg({
-            'chuva_mm': 'sum', 'umidade_1m_perc': 'mean', 'umidade_2m_perc': 'mean', 'umidade_3m_perc': 'mean'
-        }).reset_index()
+        agg_dict = {'chuva_mm': 'sum'}
+        if 'umidade_1m_perc' in df_ponto_plot.columns: agg_dict['umidade_1m_perc'] = 'mean'
+        if 'umidade_2m_perc' in df_ponto_plot.columns: agg_dict['umidade_2m_perc'] = 'mean'
+        if 'umidade_3m_perc' in df_ponto_plot.columns: agg_dict['umidade_3m_perc'] = 'mean'
+        
+        df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg(agg_dict).reset_index()
 
         df_chuva_72h_plot = df_chuva_72h_completo[
             df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
@@ -123,27 +130,32 @@ def update_general_dashboard(n_intervals, selected_hours):
 
         # --- GRÁFICO DE UMIDADE ---
         fig_umidade = go.Figure()
-        fig_umidade.add_trace(
-            go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_1m_perc'], name='Umidade 1m',
-                       mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
-        fig_umidade.add_trace(
-            go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_2m_perc'], name='Umidade 2m',
-                       mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
-        fig_umidade.add_trace(
-            go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_3m_perc'], name='Umidade 3m',
-                       mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
+        if 'umidade_1m_perc' in df_plot_15min.columns:
+            fig_umidade.add_trace(
+                go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_1m_perc'], name='Umidade 1m',
+                           mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
+        if 'umidade_2m_perc' in df_plot_15min.columns:
+            fig_umidade.add_trace(
+                go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_2m_perc'], name='Umidade 2m',
+                           mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
+        if 'umidade_3m_perc' in df_plot_15min.columns:
+            fig_umidade.add_trace(
+                go.Scatter(x=df_plot_15min['timestamp_local'], y=df_plot_15min['umidade_3m_perc'], name='Umidade 3m',
+                           mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
 
-        # Cálculo da escala Y inteligente
-        max_val_umidade = df_plot_15min[['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].max().max()
+        umidade_cols_existentes = [c for c in ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'] if c in df_plot_15min.columns]
+        max_val_umidade = 0
+        if umidade_cols_existentes:
+            max_val_umidade = df_plot_15min[umidade_cols_existentes].max().max()
         if pd.isna(max_val_umidade): max_val_umidade = 0
-        range_max = max(50, max_val_umidade * 1.1)  # Mínimo de 50%, ou 10% acima do máximo
+        range_max = max(50, max_val_umidade * 1.1)
 
         fig_umidade.update_layout(
             title_text=f"Umidade do Solo - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
             margin=dict(l=40, r=20, t=40, b=80),
             legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
             xaxis_title="Data e Hora", yaxis_title="Umidade do Solo (%)",
-            yaxis=dict(range=[0, range_max]),  # Aplica o range inteligente
+            yaxis=dict(range=[0, range_max]),
             hovermode="x unified", bargap=0, hoverlabel=dict(bgcolor="white", font_size=12)
         )
         fig_umidade.update_xaxes(dtick=3 * 60 * 60 * 1000, tickformat="%d/%m %H:%M", tickangle=-45)

@@ -1,4 +1,4 @@
-# pages/map_view.py (FINAL)
+# pages/map_view.py (CORRIGIDO v2 - Status Separados)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -12,7 +12,7 @@ import json
 
 from app import app
 from config import (
-    PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO
+    PONTOS_DE_ANALISE, CONSTANTES_PADRAO, RISCO_MAP, STATUS_MAP_HIERARQUICO, STATUS_MAP_CHUVA
 )
 
 def get_layout():
@@ -58,10 +58,8 @@ def update_map_pins(status_json):
     pinos_do_mapa = []
     for id_ponto, config in PONTOS_DE_ANALISE.items():
         status_info = status_json.get(id_ponto, {})
-        # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
-        if not isinstance(status_info, dict):
-            status_info = {}
-        # --- FIM DA CORREÇÃO ---
+        if not isinstance(status_info, dict): status_info = {}
+        
         chuva_72h_pino = status_info.get('chuva_72h', 0.0)
         
         pino = dl.Marker(
@@ -80,50 +78,36 @@ def update_map_pins(status_json):
 
 def create_km_block(id_ponto, config, status_info):
     """
-    Cria o bloco de resumo do KM para os cards laterais, usando apenas o dict de status.
+    Cria o bloco de resumo do KM com status de chuva e umidade separados.
     """
-    # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
     if not isinstance(status_info, dict):
         status_info = {}
-    # --- FIM DA CORREÇÃO ---
     
-    status_ponto_txt = status_info.get('status', 'SEM DADOS')
+    # --- Status da Chuva (Independente) ---
+    status_chuva_txt = status_info.get('chuva', 'SEM DADOS')
     ultima_chuva_72h = status_info.get('chuva_72h', 0.0)
-    umidade_1m = status_info.get('umidade_1m')
-    umidade_2m = status_info.get('umidade_2m')
-    umidade_3m = status_info.get('umidade_3m')
+    cor_chuva_badge = STATUS_MAP_CHUVA.get(status_chuva_txt, "secondary")
+    
+    # --- Status da Umidade (Independente) ---
+    status_umidade_txt = status_info.get('umidade', 'SEM DADOS')
+    risco_umidade_num = RISCO_MAP.get(status_umidade_txt, -1)
+    _, cor_umidade_badge, cor_umidade_gauge_class = STATUS_MAP_HIERARQUICO.get(risco_umidade_num, STATUS_MAP_HIERARQUICO[-1])
 
-    _, status_chuva_col, cor_chuva_class = STATUS_MAP_HIERARQUICO.get(
-        RISCO_MAP.get(status_ponto_txt, -1),
-        STATUS_MAP_HIERARQUICO[-1]
-    )
-
-    status_umid_txt = "SEM DADOS"
-    risco_umidade = -1
-    if umidade_1m is not None or umidade_2m is not None or umidade_3m is not None:
-        if umidade_3m is not None and (umidade_3m - CONSTANTES_PADRAO['UMIDADE_BASE_3M']) > 3:
-            status_umid_txt, risco_umidade = "ALERTA", 2
-        elif umidade_2m is not None and (umidade_2m - CONSTANTES_PADRAO['UMIDADE_BASE_2M']) > 3:
-            status_umid_txt, risco_umidade = "ATENÇÃO", 1
-        else:
-            status_umid_txt, risco_umidade = "LIVRE", 0
-            
-    _, status_umid_col, cor_umidade_class = STATUS_MAP_HIERARQUICO.get(risco_umidade, STATUS_MAP_HIERARQUICO[-1])
-
-    chuva_max_visual = 90.0
+    # --- Lógica de Visualização (Gauges) ---
+    chuva_max_visual = 100.0  # Limite para o gauge de chuva (100mm)
     chuva_percent = max(0, min(100, (ultima_chuva_72h / chuva_max_visual) * 100))
-    if status_ponto_txt == "SEM DADOS":
+    if status_chuva_txt == "SEM DADOS":
         chuva_percent = 0
 
     umidade_percent_realista = 0
-    if risco_umidade == 0: umidade_percent_realista = 25
-    elif risco_umidade == 1: umidade_percent_realista = 50
-    elif risco_umidade == 2: umidade_percent_realista = 75
-    elif risco_umidade == 3: umidade_percent_realista = 100
+    if risco_umidade_num == 0: umidade_percent_realista = 25
+    elif risco_umidade_num == 1: umidade_percent_realista = 50
+    elif risco_umidade_num == 2: umidade_percent_realista = 75
+    elif risco_umidade_num == 3: umidade_percent_realista = 100
 
     chuva_gauge = html.Div(
         [
-            html.Div(className=f"gauge-bar {cor_chuva_class}", style={'height': f'{chuva_percent}%'}),
+            html.Div(className=f"gauge-bar bg-{cor_chuva_badge}", style={'height': f'{chuva_percent}%'}),
             html.Div(
                 [html.Span(f"{ultima_chuva_72h:.0f}"), html.Br(), html.Span("mm", style={'fontSize': '0.8em'})],
                 className="gauge-label", style={'fontSize': '2.5em', 'lineHeight': '1.1'}
@@ -132,11 +116,12 @@ def create_km_block(id_ponto, config, status_info):
     )
 
     umidade_gauge = html.Div(
-        [html.Div(className=f"gauge-bar {cor_umidade_class}", style={'height': f'{umidade_percent_realista}%'})],
+        [html.Div(className=f"gauge-bar {cor_umidade_gauge_class}", style={'height': f'{umidade_percent_realista}%'})],
         className="gauge-vertical-container"
     )
-    chuva_badge = dbc.Badge(status_ponto_txt, color=status_chuva_col, className="w-100 mt-1 small badge-black-text")
-    umidade_badge = dbc.Badge(status_umid_txt, color=status_umid_col, className="w-100 mt-1 small badge-black-text")
+    
+    chuva_badge = dbc.Badge(status_chuva_txt, color=cor_chuva_badge, className="w-100 mt-1 small badge-black-text")
+    umidade_badge = dbc.Badge(status_umidade_txt, color=cor_umidade_badge, className="w-100 mt-1 small badge-black-text")
 
     link_destino = f"/ponto/{id_ponto}"
     conteudo_bloco = html.Div([
@@ -163,10 +148,7 @@ def update_summary_left(status_json):
         if id_ponto in PONTOS_DE_ANALISE:
             config = PONTOS_DE_ANALISE[id_ponto]
             status_info = status_json.get(id_ponto, {})
-            # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
-            if not isinstance(status_info, dict):
-                status_info = {}
-            # --- FIM DA CORREÇÃO ---
+            if not isinstance(status_info, dict): status_info = {}
             km_block = create_km_block(id_ponto, config, status_info)
             left_blocks.append(km_block)
     return left_blocks if left_blocks else dbc.Alert("Dados indisponíveis (L).", color="warning", className="m-2 small")
@@ -185,10 +167,7 @@ def update_summary_right(status_json):
         if id_ponto in PONTOS_DE_ANALISE:
             config = PONTOS_DE_ANALISE[id_ponto]
             status_info = status_json.get(id_ponto, {})
-            # --- INÍCIO DA CORREÇÃO: Garante que status_info é um dicionário ---
-            if not isinstance(status_info, dict):
-                status_info = {}
-            # --- FIM DA CORREÇÃO ---
+            if not isinstance(status_info, dict): status_info = {}
             km_block = create_km_block(id_ponto, config, status_info)
             right_blocks.append(km_block)
     return right_blocks if right_blocks else dbc.Alert("Dados indisponíveis (R).", color="warning", className="m-2 small")

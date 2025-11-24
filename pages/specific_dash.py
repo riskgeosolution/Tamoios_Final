@@ -1,3 +1,5 @@
+# pages/specific_dash.py (CORRIGIDO v2 - Otimização de Memória)
+
 import dash
 from dash import html, dcc, callback, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -134,25 +136,28 @@ def update_specific_cards(pathname, status_json):
     if not isinstance(status_info, dict):
         status_info = {}
 
-    status_geral_ponto_txt = status_info.get('status', 'INDEFINIDO')
+    # --- LÓGICA DE STATUS SEPARADA ---
+    status_chuva_txt = status_info.get('chuva', 'INDEFINIDO')
+    status_umidade_txt = status_info.get('umidade', 'INDEFINIDO')
+    
+    # Determina o status geral com base na hierarquia de risco
+    risco_chuva = RISCO_MAP.get(status_chuva_txt, -1)
+    risco_umidade = RISCO_MAP.get(status_umidade_txt, -1)
+    risco_geral = max(risco_chuva, risco_umidade)
+    
+    status_geral_texto, _, card_class_color = STATUS_MAP_HIERARQUICO.get(risco_geral, ("INDEFINIDO", "secondary", "bg-secondary"))
+
     ultima_chuva_72h = status_info.get('chuva_72h', 0.0)
     umidade_1m = status_info.get('umidade_1m')
     umidade_2m = status_info.get('umidade_2m')
     umidade_3m = status_info.get('umidade_3m')
 
-    risco_geral = RISCO_MAP.get(status_geral_ponto_txt, -1)
-    status_geral_texto, _, card_class_color = STATUS_MAP_HIERARQUICO.get(risco_geral,
-                                                                         ("INDEFINIDO", "secondary", "bg-secondary"))
-
-    css_color_s1 = CORES_UMIDADE['1m'] if umidade_1m and (
-                umidade_1m - CONSTANTES_PADRAO['UMIDADE_BASE_1M']) >= DELTA_TRIGGER_UMIDADE else 'green'
-    css_color_s2 = CORES_UMIDADE['2m'] if umidade_2m and (
-                umidade_2m - CONSTANTES_PADRAO['UMIDADE_BASE_2M']) >= DELTA_TRIGGER_UMIDADE else 'green'
-    css_color_s3 = CORES_UMIDADE['3m'] if umidade_3m and (
-                umidade_3m - CONSTANTES_PADRAO['UMIDADE_BASE_3M']) >= DELTA_TRIGGER_UMIDADE else 'green'
+    css_color_s1 = CORES_UMIDADE['1m'] if umidade_1m and (umidade_1m - CONSTANTES_PADRAO.get('UMIDADE_BASE_1M', 39.0)) >= DELTA_TRIGGER_UMIDADE else 'green'
+    css_color_s2 = CORES_UMIDADE['2m'] if umidade_2m and (umidade_2m - CONSTANTES_PADRAO.get('UMIDADE_BASE_2M', 43.0)) >= DELTA_TRIGGER_UMIDADE else 'green'
+    css_color_s3 = CORES_UMIDADE['3m'] if umidade_3m and (umidade_3m - CONSTANTES_PADRAO.get('UMIDADE_BASE_3M', 10.0)) >= DELTA_TRIGGER_UMIDADE else 'green'
 
     layout_cards = [
-        dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Atual"), html.P(status_geral_texto, className="fs-3 fw-bold")]),
+        dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Geral"), html.P(status_geral_texto, className="fs-3 fw-bold")]),
                          className=f"shadow h-100 {card_class_color}"), xs=12, md=4, className="mb-4"),
         dbc.Col(dbc.Card(
             dbc.CardBody([html.H5("Chuva 72h"), html.P(f"{ultima_chuva_72h:.1f} mm", className="fs-3 fw-bold")]),
@@ -188,7 +193,9 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     if not config:
         return dbc.Alert("Ponto não encontrado.", color="danger"), id_ponto
 
-    df_completo = data_source.read_data_from_sqlite(last_hours=100)
+    # --- OTIMIZAÇÃO DE MEMÓRIA ---
+    horas_para_buscar = max(selected_hours, 73)
+    df_completo = data_source.read_data_from_sqlite(id_ponto=id_ponto, last_hours=horas_para_buscar)
 
     try:
         if df_completo.empty or 'timestamp' not in df_completo.columns:
@@ -201,18 +208,20 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
 
         numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         for col in numeric_cols:
-            df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
+            if col in df_completo.columns:
+                df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
 
     except Exception as e:
         return dbc.Alert(f"Erro ao processar dados: {e}", color="danger"), id_ponto
 
-    df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
+    df_ponto = df_completo.copy() # Não precisa mais filtrar por id_ponto
     if df_ponto.empty:
         return dbc.Alert("Sem dados históricos para este ponto.", color="warning"), id_ponto
 
     df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
     umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
-    df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
+    if all(c in df_ponto.columns for c in umidade_cols):
+        df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
     df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
     df_chuva_FILTRO_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
@@ -221,15 +230,17 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
 
+    agg_dict = {'chuva_mm': 'sum'}
+    if 'umidade_1m_perc' in df_ponto_plot.columns: agg_dict['umidade_1m_perc'] = 'mean'
+    if 'umidade_2m_perc' in df_ponto_plot.columns: agg_dict['umidade_2m_perc'] = 'mean'
+    if 'umidade_3m_perc' in df_ponto_plot.columns: agg_dict['umidade_3m_perc'] = 'mean'
+
     if not df_ponto_plot.empty:
-        df_plot_10min = df_ponto_plot.set_index('timestamp_local').resample('10T').agg({
-            'chuva_mm': 'sum', 'umidade_1m_perc': 'last', 'umidade_2m_perc': 'last', 'umidade_3m_perc': 'last'
-        }).reset_index()
-        # Aplica ffill novamente após o resample para garantir que buracos de 10min sejam preenchidos
-        df_plot_10min[umidade_cols] = df_plot_10min[umidade_cols].ffill()
+        df_plot_10min = df_ponto_plot.set_index('timestamp_local').resample('10T').agg(agg_dict).reset_index()
+        if all(c in df_plot_10min.columns for c in umidade_cols):
+            df_plot_10min[umidade_cols] = df_plot_10min[umidade_cols].ffill()
     else:
-        df_plot_10min = pd.DataFrame(
-            columns=['timestamp_local', 'chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
+        df_plot_10min = pd.DataFrame(columns=['timestamp_local', 'chuva_mm'] + umidade_cols)
 
     df_chuva_FILTRO_plot = df_chuva_FILTRO_completo[
         df_chuva_FILTRO_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
@@ -240,71 +251,39 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
         if 'timestamp' in df.columns:
             df.loc[:, 'timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-    # --- CONFIGURAÇÃO VISUAL DO EIXO X (3 em 3 horas + 45 graus) ---
-    axis_style = dict(
-        title="Data e Hora",
-        dtick=10800000,  # 3 horas em milissegundos
-        tickformat="%H:%M\n%d/%b",
-        tickangle=-45  # Inclinação de 45 graus
-    )
+    axis_style = dict(title="Data e Hora", dtick=10800000, tickformat="%H:%M\n%d/%b", tickangle=-45)
 
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
-    fig_chuva.add_trace(
-        go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_mm'], name='Pluv. 10 min (mm)',
-               marker_color='#2C3E50', opacity=0.8), secondary_y=False)
-    fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'],
-                                   name=f'Acumulada ({selected_hours}h)', mode='lines',
-                                   line=dict(color='#007BFF', width=2.5)), secondary_y=True)
-    fig_chuva.add_trace(
-        go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
-                   mode='lines', line=dict(color='green', width=2, dash='dot'), visible='legendonly'), secondary_y=True)
-
-    fig_chuva.update_layout(
-        title_text=f"Pluviometria - Estação {config['nome']}",
-        template=TEMPLATE_GRAFICO_MODERNO,
-        margin=dict(l=40, r=20, t=50, b=80),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5),
-        xaxis=axis_style,
-        yaxis_title="Pluviometria (mm/10min)",
-        yaxis2_title=f"Acumulada ({selected_hours}h)",
-        hovermode="x unified"
-    )
+    fig_chuva.add_trace(go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_mm'], name='Pluv. 10 min (mm)', marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+    fig_chuva.add_trace(go.Scatter(x=df_chuva_FILTRO_plot['timestamp_local'], y=df_chuva_FILTRO_plot['chuva_mm'], name=f'Acumulada ({selected_hours}h)', mode='lines', line=dict(color='#007BFF', width=2.5)), secondary_y=True)
+    fig_chuva.add_trace(go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)', mode='lines', line=dict(color='green', width=2, dash='dot'), visible='legendonly'), secondary_y=True)
+    fig_chuva.update_layout(title_text=f"Pluviometria - Estação {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=50, b=80), legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5), xaxis=axis_style, yaxis_title="Pluviometria (mm/10min)", yaxis2_title=f"Acumulada ({selected_hours}h)", hovermode="x unified")
 
     fig_umidade = go.Figure()
-    fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_1m_perc'], name='Umidade 1m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
-    fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_2m_perc'], name='Umidade 2m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
-    fig_umidade.add_trace(
-        go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_3m_perc'], name='Umidade 3m',
-                   mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
+    if 'umidade_1m_perc' in df_plot_10min.columns:
+        fig_umidade.add_trace(go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_1m_perc'], name='Umidade 1m', mode='lines', line=dict(color=CORES_UMIDADE['1m'], width=3)))
+    if 'umidade_2m_perc' in df_plot_10min.columns:
+        fig_umidade.add_trace(go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_2m_perc'], name='Umidade 2m', mode='lines', line=dict(color=CORES_UMIDADE['2m'], width=3)))
+    if 'umidade_3m_perc' in df_plot_10min.columns:
+        fig_umidade.add_trace(go.Scatter(x=df_plot_10min['timestamp_local'], y=df_plot_10min['umidade_3m_perc'], name='Umidade 3m', mode='lines', line=dict(color=CORES_UMIDADE['3m'], width=3)))
 
-    max_val_umidade = df_plot_10min[['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']].max().max()
+    umidade_cols_existentes = [c for c in ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'] if c in df_plot_10min.columns]
+    max_val_umidade = 0
+    if umidade_cols_existentes:
+        max_val_umidade = df_plot_10min[umidade_cols_existentes].max().max()
     if pd.isna(max_val_umidade): max_val_umidade = 0
     range_max = max(50, max_val_umidade * 1.1)
 
-    fig_umidade.update_layout(
-        title_text=f"Variação da Umidade do Solo - Estação {config['nome']}",
-        template=TEMPLATE_GRAFICO_MODERNO,
-        margin=dict(l=40, r=20, t=40, b=80),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-        xaxis=axis_style,
-        yaxis_title="Umidade do Solo (%)",
-        yaxis=dict(range=[0, range_max]),
-        hovermode="x unified"
-    )
+    fig_umidade.update_layout(title_text=f"Variação da Umidade do Solo - Estação {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=80), legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5), xaxis=axis_style, yaxis_title="Umidade do Solo (%)", yaxis=dict(range=[0, range_max]), hovermode="x unified")
 
     layout_graficos = [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
-        dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
-                className="mb-4"),
+        dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12, className="mb-4"),
     ]
     return layout_graficos, id_ponto
 
 
-# Callbacks de logs e relatórios
+# (O resto das callbacks de logs e relatórios permanece o mesmo)
 @app.callback(Output('modal-logs', 'is_open'),
               [Input('btn-ver-logs', 'n_clicks'), Input('btn-fechar-logs', 'n_clicks')],
               [State('modal-logs', 'is_open')], prevent_initial_call=True)
@@ -327,7 +306,6 @@ def load_logs_content(is_open, id_ponto, logs_json):
     try:
         logs_list = json.loads(logs_json) if isinstance(logs_json, str) else logs_json
         logs_ponto = [log for log in logs_list if f"| {id_ponto} |" in log or "| GERAL |" in log]
-        # ... (lógica de formatação de logs)
         return html.Pre('\n'.join(reversed(logs_ponto))), logs_ponto
     except Exception:
         return "Erro ao carregar logs.", []
@@ -339,9 +317,7 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
     if not n_clicks or not id_ponto or not logs_filtrados: return dash.no_update
     config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
     pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
-    data = pdf_buffer.getvalue()
-    filename = f"Logs_{config['nome']}_{datetime.now().strftime('%Y%m%d')}.pdf"
-    return dcc.send_bytes(lambda f: f.write(data), filename)
+    return dcc.send_bytes(lambda f: f.write(pdf_buffer.getvalue()), f"Logs_{config['nome']}_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf")
 
 
 @app.callback([Output('pdf-task-id-store', 'data'), Output('pdf-check-interval', 'disabled'),
@@ -371,8 +347,7 @@ def check_pdf_status(n, task_id):
         with PDF_CACHE_LOCK:
             del PDF_CACHE[task_id]
         if task["status"] == "concluido":
-            return dcc.send_bytes(lambda f: f.write(task["data"]),
-                                  task["filename"]), True, None, False, False, False, False
+            return dcc.send_bytes(lambda f: f.write(task["data"]), task["filename"]), True, None, False, False, False, False
         else:
             is_no_data = "Sem dados" in task["message"]
             return dash.no_update, True, None, is_no_data, not is_no_data, False, False
@@ -410,8 +385,7 @@ def check_excel_status(n, task_id):
         with EXCEL_CACHE_LOCK:
             del EXCEL_CACHE[task_id]
         if task["status"] == "concluido":
-            return dcc.send_bytes(lambda f: f.write(task["data"]),
-                                  task["filename"]), True, None, False, False, False, False
+            return dcc.send_bytes(lambda f: f.write(task["data"]), task["filename"]), True, None, False, False, False, False
         else:
             is_no_data = "Sem dados" in task["message"]
             return dash.no_update, True, None, is_no_data, not is_no_data, False, False
@@ -419,21 +393,25 @@ def check_excel_status(n, task_id):
 
 
 @app.callback(Output('dynamic-accumulated-output', 'children'),
-              [Input('graph-time-selector', 'value'), Input('store-dados-sessao', 'data'),
+              [Input('graph-time-selector', 'value'),
                Input('url-raiz', 'pathname')])
-def update_dynamic_accumulated_text(selected_hours, dados_json, pathname):
-    if selected_hours == 72 or not dados_json or not pathname.startswith('/ponto/'): return None
+def update_dynamic_accumulated_text(selected_hours, pathname):
+    if selected_hours == 72 or not pathname.startswith('/ponto/'): return None
     try:
         id_ponto = pathname.split('/')[-1]
-        df_completo = pd.read_json(StringIO(dados_json), orient='split')
-        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto].copy()
+        # Busca apenas os dados necessários para o cálculo
+        df_ponto = data_source.read_data_from_sqlite(id_ponto=id_ponto, last_hours=selected_hours)
         if df_ponto.empty: return None
+        
         df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
         df_ponto.loc[:, 'chuva_mm'] = pd.to_numeric(df_ponto['chuva_mm'], errors='coerce').fillna(0)
+        
         df_acumulado = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
         if df_acumulado.empty: return None
+        
         valor_acumulado = df_acumulado.iloc[-1]['chuva_mm']
         if pd.isna(valor_acumulado): return None
+        
         return html.P(f"Acumulado ({selected_hours}h): {valor_acumulado:.1f} mm", className="mb-0 ms-3",
                       style={'fontSize': '0.85rem', 'fontWeight': 'bold', 'color': '#555'})
     except Exception:

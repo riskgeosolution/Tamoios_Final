@@ -103,6 +103,16 @@ RISCO_MAP = {
     "ERRO": -1
 }
 
+# --- MAPAS DE STATUS E CORES ---
+STATUS_MAP_CHUVA = {
+    "LIVRE": "success",
+    "ATENÇÃO": "warning",
+    "ALERTA": "orange",
+    "PARALIZAÇÃO": "danger",
+    "SEM DADOS": "secondary",
+    "INDEFINIDO": "secondary"
+}
+
 STATUS_MAP_HIERARQUICO = {
     3: ("PARALIZAÇÃO", "danger", "bg-danger"),
     2: ("ALERTA", "orange", "bg-orange"),
