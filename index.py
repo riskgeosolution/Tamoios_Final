@@ -1,4 +1,4 @@
-# index.py (CORREÇÃO FINAL v13 - Merge com concat + groupby)
+# index.py (CORREÇÃO FINAL v14 - Worker Compatível com Render/Gunicorn)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -30,8 +30,12 @@ from config import RENDER_SLEEP_TIME_SEC
 SENHA_CLIENTE = '@Tamoiosv1'
 SENHA_ADMIN = 'admin456'
 
+# Inicializa banco de dados ao carregar o arquivo
 data_source.setup_disk_paths()
 data_source.initialize_database()
+
+
+# --- FUNÇÕES DO WORKER (Coleta e Processamento) ---
 
 def worker_verificar_alertas(status_novos, status_antigos):
     if not status_novos: return status_antigos
@@ -40,7 +44,10 @@ def worker_verificar_alertas(status_novos, status_antigos):
     for id_ponto in PONTOS_DE_ANALISE.keys():
         status_novo_ponto = status_novos.get(id_ponto, {"chuva": "SEM DADOS", "umidade": "SEM DADOS"})
         status_antigo_ponto = status_antigos.get(id_ponto, {"chuva": "INDEFINIDO", "umidade": "INDEFINIDO"})
-        if not isinstance(status_antigo_ponto, dict): status_antigo_ponto = {"chuva": "INDEFINIDO", "umidade": "INDEFINIDO"}
+        if not isinstance(status_antigo_ponto, dict): status_antigo_ponto = {"chuva": "INDEFINIDO",
+                                                                             "umidade": "INDEFINIDO"}
+
+        # Loga mudanças de status
         if status_novo_ponto.get("chuva") != status_antigo_ponto.get("chuva"):
             nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
             msg = f"MUDANÇA DE STATUS (Chuva): {nome_ponto} de {status_antigo_ponto.get('chuva')} para {status_novo_ponto.get('chuva')}."
@@ -49,8 +56,10 @@ def worker_verificar_alertas(status_novos, status_antigos):
             nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
             msg = f"MUDANÇA DE STATUS (Umidade): {nome_ponto} de {status_antigo_ponto.get('umidade')} para {status_novo_ponto.get('umidade')}."
             data_source.adicionar_log(id_ponto, msg, level="WARN")
+
         status_atualizado[id_ponto] = status_novo_ponto
     return status_atualizado
+
 
 def worker_main_loop(memoria_worker):
     inicio_ciclo = time.time()
@@ -58,62 +67,84 @@ def worker_main_loop(memoria_worker):
         data_source.adicionar_log("WORKER", "Início do ciclo de processamento.")
         historico_recente_df = data_source.get_recent_data_for_worker(hours=75)
         status_antigos_do_disco = data_source.get_status_from_disk()
-        
-        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api(memoria_worker.get('ultimo_acumulado_chuva', {}))
+
+        # Coleta dados das APIs
+        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api(
+            memoria_worker.get('ultimo_acumulado_chuva', {}))
         memoria_worker['ultimo_acumulado_chuva'] = novos_acumulados_chuva
         df_umidade_incremental = data_source.fetch_data_from_zentra_cloud()
 
         # --- LÓGICA DE MERGE SEGURA COM CONCAT E GROUPBY ---
-        # 1. Coloca os dados novos e mais específicos primeiro na concatenação
-        df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df], ignore_index=True)
+        # 1. Coloca os dados novos e mais específicos primeiro
+        df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df],
+                                 ignore_index=True)
 
-        # 2. Garante que não há timestamps nulos
+        # 2. Limpeza básica
         df_combinado['timestamp'] = pd.to_datetime(df_combinado['timestamp'], errors='coerce')
         df_combinado.dropna(subset=['timestamp'], inplace=True)
-
-        # 3. Garante que colunas numéricas não tenham strings
-        numeric_cols = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+        numeric_cols = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc',
+                        'umidade_3m_perc']
         for col in numeric_cols:
             if col in df_combinado.columns:
                 df_combinado[col] = pd.to_numeric(df_combinado[col], errors='coerce')
 
-        # 4. Agrupa e pega o PRIMEIRO valor não-nulo de cada coluna.
-        # Como os dados novos estão no início, eles têm prioridade.
+        # 3. Agrupa pelo timestamp e ponto, mantendo o PRIMEIRO valor encontrado (o mais recente/API)
         agg_funcs = {col: 'first' for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
         df_final = df_combinado.groupby(['timestamp', 'id_ponto'], as_index=False).agg(agg_funcs)
 
+        # Salva no banco
         data_source.upsert_data(df_final)
-        historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
 
+        # Recalcula status com base no histórico atualizado
+        historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
         status_atualizado = {}
+
         if not historico_para_calculo.empty:
             for id_ponto in PONTOS_DE_ANALISE.keys():
                 df_ponto = historico_para_calculo[historico_para_calculo['id_ponto'] == id_ponto].copy()
-                ponto_info = {"chuva": "SEM DADOS", "umidade": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None, "umidade_2m": None, "umidade_3m": None, "timestamp_local": None}
+                ponto_info = {"chuva": "SEM DADOS", "umidade": "SEM DADOS", "chuva_72h": 0.0, "umidade_1m": None,
+                              "umidade_2m": None, "umidade_3m": None, "timestamp_local": None}
+
                 if df_ponto.empty:
                     status_atualizado[id_ponto] = ponto_info
                     continue
+
+                # Cálculo Chuva
                 acumulado_72h = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
                 chuva_72h_final = acumulado_72h['chuva_mm'].iloc[-1] if not acumulado_72h.empty else 0.0
                 ponto_info['chuva_72h'] = round(chuva_72h_final, 1) if pd.notna(chuva_72h_final) else 0.0
                 status_chuva, _ = processamento.definir_status_chuva(ponto_info['chuva_72h'])
                 ponto_info['chuva'] = status_chuva
+
+                # Cálculo Umidade
                 ultimo_dado = df_ponto.sort_values('timestamp').iloc[-1]
-                ponto_info['umidade_1m'] = round(ultimo_dado.get('umidade_1m_perc'), 1) if pd.notna(ultimo_dado.get('umidade_1m_perc')) else None
-                ponto_info['umidade_2m'] = round(ultimo_dado.get('umidade_2m_perc'), 1) if pd.notna(ultimo_dado.get('umidade_2m_perc')) else None
-                ponto_info['umidade_3m'] = round(ultimo_dado.get('umidade_3m_perc'), 1) if pd.notna(ultimo_dado.get('umidade_3m_perc')) else None
+                ponto_info['umidade_1m'] = round(ultimo_dado.get('umidade_1m_perc'), 1) if pd.notna(
+                    ultimo_dado.get('umidade_1m_perc')) else None
+                ponto_info['umidade_2m'] = round(ultimo_dado.get('umidade_2m_perc'), 1) if pd.notna(
+                    ultimo_dado.get('umidade_2m_perc')) else None
+                ponto_info['umidade_3m'] = round(ultimo_dado.get('umidade_3m_perc'), 1) if pd.notna(
+                    ultimo_dado.get('umidade_3m_perc')) else None
+
                 if pd.notna(ultimo_dado.get('timestamp')):
-                    ponto_info['timestamp_local'] = pd.to_datetime(ultimo_dado.get('timestamp')).tz_convert('America/Sao_Paulo').isoformat()
+                    ponto_info['timestamp_local'] = pd.to_datetime(ultimo_dado.get('timestamp')).tz_convert(
+                        'America/Sao_Paulo').isoformat()
+
                 df_umidade_hist = df_ponto.dropna(subset=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'])
-                bases = {f'base_{d}m': df_umidade_hist[f'umidade_{d}m_perc'].min() if not df_umidade_hist.empty else CONSTANTES_PADRAO[f'UMIDADE_BASE_{d}M'] for d in [1, 2, 3]}
-                status_umidade_tuple = processamento.definir_status_umidade_hierarquico(ponto_info['umidade_1m'], ponto_info['umidade_2m'], ponto_info['umidade_3m'], **bases)
+                bases = {f'base_{d}m': df_umidade_hist[f'umidade_{d}m_perc'].min() if not df_umidade_hist.empty else
+                CONSTANTES_PADRAO[f'UMIDADE_BASE_{d}M'] for d in [1, 2, 3]}
+
+                status_umidade_tuple = processamento.definir_status_umidade_hierarquico(ponto_info['umidade_1m'],
+                                                                                        ponto_info['umidade_2m'],
+                                                                                        ponto_info['umidade_3m'],
+                                                                                        **bases)
                 status_umidade = status_umidade_tuple[0] if status_umidade_tuple[0] != "SEM DADOS" else "LIVRE"
                 ponto_info['umidade'] = status_umidade
+
                 status_atualizado[id_ponto] = ponto_info
-        
+
         status_final_completo = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
         data_source.write_with_timeout(data_source.STATUS_FILE, status_final_completo, timeout=20)
-        
+
         data_source.adicionar_log("WORKER", f"Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
         return True, memoria_worker
     except Exception as e:
@@ -121,18 +152,25 @@ def worker_main_loop(memoria_worker):
         traceback.print_exc()
         return False, memoria_worker
 
+
 def background_task_wrapper():
+    """ Loop infinito que roda em uma thread separada """
     data_source.adicionar_log("SISTEMA", "Processo Worker (Thread) iniciado.")
     time.sleep(RENDER_SLEEP_TIME_SEC)
     memoria_worker = {}
     INTERVALO_EM_MINUTOS = 10
     CARENCIA_EM_SEGUNDOS = 60
+
     while True:
         sucesso, memoria_worker = worker_main_loop(memoria_worker)
+
         if not sucesso:
-            data_source.adicionar_log("SISTEMA", f"Ciclo do worker falhou. Reiniciando em {RENDER_SLEEP_TIME_SEC}s.", level="ERROR")
+            data_source.adicionar_log("SISTEMA", f"Ciclo do worker falhou. Reiniciando em {RENDER_SLEEP_TIME_SEC}s.",
+                                      level="ERROR")
             time.sleep(RENDER_SLEEP_TIME_SEC)
             continue
+
+        # Calcula tempo para dormir até o próximo slot (ex: 10:00, 10:10, 10:20)
         agora = datetime.datetime.now(datetime.timezone.utc)
         proximo_minuto_slot = (agora.minute // INTERVALO_EM_MINUTOS + 1) * INTERVALO_EM_MINUTOS
         if proximo_minuto_slot >= 60:
@@ -140,11 +178,16 @@ def background_task_wrapper():
             proxima_exec_base = proxima_hora.replace(minute=0, second=0, microsecond=0)
         else:
             proxima_exec_base = agora.replace(minute=proximo_minuto_slot, second=0, microsecond=0)
+
         proxima_exec_com_carencia = proxima_exec_base + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
         sleep_time = (proxima_exec_com_carencia - agora).total_seconds()
+
         if sleep_time < 0: sleep_time = CARENCIA_EM_SEGUNDOS
         data_source.adicionar_log("WORKER", f"Próxima execução em ~{sleep_time:.0f}s...")
         time.sleep(sleep_time)
+
+
+# --- LAYOUT E CALLBACKS DO DASH ---
 
 app.layout = html.Div([
     dcc.Store(id='session-store', data={'logged_in': False, 'user_type': 'guest'}, storage_type='session'),
@@ -155,10 +198,12 @@ app.layout = html.Div([
     html.Div(id='page-container-root')
 ])
 
+
 @app.callback(Output('page-container-root', 'children'), [Input('session-store', 'data')])
 def display_page_root(session_data):
     if session_data and session_data.get('logged_in'): return main_app_page.get_layout()
     return login_page.get_layout()
+
 
 @app.callback(Output('page-content', 'children'), [Input('url-raiz', 'pathname'), Input('session-store', 'data')])
 def display_page_content(pathname, session_data):
@@ -167,8 +212,10 @@ def display_page_content(pathname, session_data):
     if pathname == '/dashboard-geral': return general_dash.get_layout()
     return map_view.get_layout()
 
+
 @app.callback(
-    [Output('session-store', 'data'), Output('login-error-output', 'children'), Output('login-error-output', 'className'), Output('input-password', 'value')],
+    [Output('session-store', 'data'), Output('login-error-output', 'children'),
+     Output('login-error-output', 'className'), Output('input-password', 'value')],
     [Input('btn-login', 'n_clicks'), Input('input-password', 'n_submit')],
     [State('input-password', 'value')], prevent_initial_call=True
 )
@@ -180,23 +227,44 @@ def login_callback(n_clicks, n_submit, password):
     if password == SENHA_CLIENTE: return {'logged_in': True, 'user_type': 'client'}, "", "", ""
     return dash.no_update, "Senha incorreta.", "text-danger mb-3 text-center", ""
 
-@app.callback([Output('session-store', 'data', allow_duplicate=True), Output('url-raiz', 'pathname')], [Input('logout-button', 'n_clicks')], prevent_initial_call=True)
+
+@app.callback([Output('session-store', 'data', allow_duplicate=True), Output('url-raiz', 'pathname')],
+              [Input('logout-button', 'n_clicks')], prevent_initial_call=True)
 def logout_callback(n_clicks):
     if not n_clicks: raise PreventUpdate
     return {'logged_in': False, 'user_type': 'guest'}, '/'
+
 
 @app.callback(Output('intervalo-atualizacao-dados', 'disabled'), [Input('session-store', 'data')])
 def toggle_interval_update(session_data):
     return not (session_data and session_data.get('logged_in'))
 
-@app.callback([Output('store-ultimo-status', 'data'), Output('store-logs-sessao', 'data')], [Input('intervalo-atualizacao-dados', 'n_intervals')])
+
+@app.callback([Output('store-ultimo-status', 'data'), Output('store-logs-sessao', 'data')],
+              [Input('intervalo-atualizacao-dados', 'n_intervals')])
 def update_status_and_logs_from_disk(n_intervals):
     status = data_source.get_status_from_disk()
     logs = data_source.ler_logs_eventos("GERAL")
     return status, logs
 
+
+# --- INICIALIZAÇÃO DO WORKER EM PRODUÇÃO ---
+def iniciar_worker_automatico():
+    """Inicia o worker se não estivermos no modo de recarregamento (reloader) do Werkzeug"""
+    if not os.environ.get("WERKZEUG_MAIN"):
+        data_source.adicionar_log("SISTEMA", "Inicializando Worker em Thread (Global Scope).")
+        t = Thread(target=background_task_wrapper, daemon=True)
+        t.start()
+
+
+# CHAMADA IMEDIATA: Isso garante que o Gunicorn inicie o worker ao carregar este arquivo
+# (Isso resolve o problema de o worker não rodar no Render)
+iniciar_worker_automatico()
+
+# --- BLOCO PRINCIPAL (Apenas para execução local via 'python index.py') ---
 if __name__ == '__main__':
     args = sys.argv
+    # Verifica argumentos de linha de comando para modo Backfill
     if len(args) > 1 and args[1].lower() == 'backfill':
         if len(args) != 4:
             print("Uso incorreto. Exemplo: python index.py backfill <ID_DO_PONTO> <DIAS_PARA_TRAS>")
@@ -216,11 +284,7 @@ if __name__ == '__main__':
             except Exception as e:
                 print(f"Ocorreu um erro durante o backfill: {e}")
     else:
-        if not os.environ.get("WERKZEUG_MAIN"):
-            data_source.adicionar_log("SISTEMA", "Iniciando o worker (coletor de dados) em um thread separado.")
-            Thread(target=background_task_wrapper, daemon=True).start()
-        else:
-            data_source.adicionar_log("SISTEMA", "O reloader do Dash está ativo. O worker não será iniciado neste processo.", level="WARN")
-        
-        data_source.adicionar_log("SISTEMA", f"Iniciando o servidor Dash em http://127.0.0.1:8050/")
+        # Execução local (Desenvolvimento)
+        data_source.adicionar_log("SISTEMA", "Iniciando servidor Dash Localmente...")
+        # Nota: use_reloader=False evita duplicar o worker localmente, já que chamamos iniciar_worker_automatico() acima
         app.run(debug=True, host='127.0.0.1', port=8050, use_reloader=False)
