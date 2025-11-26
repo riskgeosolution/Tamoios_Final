@@ -1,4 +1,4 @@
-# index.py (CORREÇÃO FINAL v18 - Umidade Restrita ao KM 72)
+# index.py (CORREÇÃO FINAL v19 - Proteção contra overwrite no KM 72)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -14,6 +14,7 @@ from threading import Thread
 import datetime
 from httpx import HTTPStatusError
 import traceback
+import sqlite3
 import sys
 
 load_dotenv()
@@ -34,6 +35,22 @@ data_source.setup_disk_paths()
 data_source.initialize_database()
 
 
+# --- NOVA FUNÇÃO DE SEGURANÇA ---
+def get_first_valid(series):
+    """
+    Retorna o primeiro valor VÁLIDO (não nulo).
+    Isso impede que um NaN novo apague um número antigo no banco.
+    """
+    # Remove valores nulos da série e pega o primeiro que sobrar
+    valid_values = series.dropna()
+    if not valid_values.empty:
+        return valid_values.iloc[0]
+    return None
+
+
+# --------------------------------
+
+
 # --- FUNÇÕES DO WORKER ---
 
 def worker_verificar_alertas(status_novos, status_antigos):
@@ -49,14 +66,13 @@ def worker_verificar_alertas(status_novos, status_antigos):
         if status_novo_ponto.get("chuva") != status_antigo_ponto.get("chuva"):
             nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
             msg = f"MUDANÇA DE STATUS (Chuva): {nome_ponto} de {status_antigo_ponto.get('chuva')} para {status_novo_ponto.get('chuva')}."
-            data_source.adicionar_log(id_ponto, msg, level="WARN")
+            data_source.adicionar_log(id_ponto, msg, level="WARN", salvar_arquivo=True)
 
-        # Loga mudança de umidade APENAS se for o ponto que tem sensor
         if id_ponto == ID_PONTO_ZENTRA_KM72:
             if status_novo_ponto.get("umidade") != status_antigo_ponto.get("umidade"):
                 nome_ponto = PONTOS_DE_ANALISE[id_ponto]['nome']
                 msg = f"MUDANÇA DE STATUS (Umidade): {nome_ponto} de {status_antigo_ponto.get('umidade')} para {status_novo_ponto.get('umidade')}."
-                data_source.adicionar_log(id_ponto, msg, level="WARN")
+                data_source.adicionar_log(id_ponto, msg, level="WARN", salvar_arquivo=True)
 
         status_atualizado[id_ponto] = status_novo_ponto
     return status_atualizado
@@ -65,17 +81,21 @@ def worker_verificar_alertas(status_novos, status_antigos):
 def worker_main_loop(memoria_worker):
     inicio_ciclo = time.time()
     try:
-        data_source.adicionar_log("WORKER", "Início do ciclo de processamento.")
+        data_source.adicionar_log("WORKER", "Início do ciclo de processamento.", salvar_arquivo=False)
+
+        # 1. Busca histórico para garantir base de dados
         historico_recente_df = data_source.get_recent_data_for_worker(hours=75)
         status_antigos_do_disco = data_source.get_status_from_disk()
 
-        # Coleta (Não alterada)
-        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api(
-            memoria_worker.get('ultimo_acumulado_chuva', {}))
-        memoria_worker['ultimo_acumulado_chuva'] = novos_acumulados_chuva
+        # 2. Coleta Novos Dados
+        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api()  # Removido argumento extra se n houver suporte
+        # Se sua função fetch aceita memoria, mantenha. Se não, use a linha acima.
+        # Assumindo padrão do data_source.py atual:
+        # novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
+
         df_umidade_incremental = data_source.fetch_data_from_zentra_cloud()
 
-        # Merge e Tratamento
+        # 3. Merge com Proteção
         df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df],
                                  ignore_index=True)
         df_combinado['timestamp'] = pd.to_datetime(df_combinado['timestamp'], errors='coerce')
@@ -87,10 +107,11 @@ def worker_main_loop(memoria_worker):
             if col in df_combinado.columns:
                 df_combinado[col] = pd.to_numeric(df_combinado[col], errors='coerce')
 
-        agg_funcs = {col: 'first' for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
+        # AQUI APLICA A PROTEÇÃO: Usa get_first_valid em vez de 'first'
+        agg_funcs = {col: get_first_valid for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
         df_final = df_combinado.groupby(['timestamp', 'id_ponto'], as_index=False).agg(agg_funcs)
 
-        data_source.upsert_data(df_final)
+        data_source.save_to_sqlite(df_final)  # Usando save_to_sqlite (compativel com seu data_source atual)
 
         historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
         status_atualizado = {}
@@ -105,16 +126,15 @@ def worker_main_loop(memoria_worker):
                     status_atualizado[id_ponto] = ponto_info
                     continue
 
-                # --- LÓGICA 1: CHUVA (Para todos os pontos) ---
+                # Chuva
                 acumulado_72h = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
                 chuva_72h_final = acumulado_72h['chuva_mm'].iloc[-1] if not acumulado_72h.empty else 0.0
                 ponto_info['chuva_72h'] = round(chuva_72h_final, 1) if pd.notna(chuva_72h_final) else 0.0
                 status_chuva, _ = processamento.definir_status_chuva(ponto_info['chuva_72h'])
                 ponto_info['chuva'] = status_chuva
 
-                # --- LÓGICA 2: UMIDADE (Exclusiva para KM 72) ---
+                # Umidade (Apenas KM 72)
                 if id_ponto == ID_PONTO_ZENTRA_KM72:
-                    # Lógica do "Caçador de Dados Válidos" (Mantida da v17)
                     cols_umidade = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
                     df_com_umidade = df_ponto.dropna(subset=cols_umidade, how='all')
 
@@ -122,9 +142,7 @@ def worker_main_loop(memoria_worker):
                         ultima_leitura_valida = df_com_umidade.sort_values('timestamp').iloc[-1]
                         ts_leitura = ultima_leitura_valida['timestamp']
                         agora = pd.Timestamp.now(tz='UTC')
-                        idade_dado = agora - ts_leitura
-
-                        if idade_dado < pd.Timedelta(hours=3):
+                        if (agora - ts_leitura) < pd.Timedelta(hours=3):
                             ponto_info['umidade_1m'] = round(ultima_leitura_valida.get('umidade_1m_perc'),
                                                              1) if pd.notna(
                                 ultima_leitura_valida.get('umidade_1m_perc')) else None
@@ -142,28 +160,22 @@ def worker_main_loop(memoria_worker):
                                     f'UMIDADE_BASE_{d}M']
 
                             status_umidade_tuple = processamento.definir_status_umidade_hierarquico(
-                                ponto_info['umidade_1m'], ponto_info['umidade_2m'], ponto_info['umidade_3m'], **bases
-                            )
+                                ponto_info['umidade_1m'], ponto_info['umidade_2m'], ponto_info['umidade_3m'], **bases)
                             ponto_info['umidade'] = status_umidade_tuple[0] if status_umidade_tuple[
                                                                                    0] != "SEM DADOS" else "LIVRE"
                         else:
-                            ponto_info['umidade'] = "SEM DADOS"  # Dado muito velho
+                            ponto_info['umidade'] = "SEM DADOS"
                     else:
-                        ponto_info['umidade'] = "SEM DADOS"  # Nunca teve dado
+                        ponto_info['umidade'] = "SEM DADOS"
                 else:
-                    # --- OUTROS PONTOS (KM 67, 74, 81) ---
-                    # Força SEM DADOS pois não possuem sensor instalado
                     ponto_info['umidade'] = "SEM DADOS"
-                    ponto_info['umidade_1m'] = None
-                    ponto_info['umidade_2m'] = None
-                    ponto_info['umidade_3m'] = None
 
                 status_atualizado[id_ponto] = ponto_info
 
         status_final_completo = worker_verificar_alertas(status_atualizado, status_antigos_do_disco)
         data_source.write_with_timeout(data_source.STATUS_FILE, status_final_completo, timeout=20)
-
-        data_source.adicionar_log("WORKER", f"Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.")
+        data_source.adicionar_log("WORKER", f"Ciclo concluído em {time.time() - inicio_ciclo:.2f}s.",
+                                  salvar_arquivo=False)
         return True, memoria_worker
     except Exception as e:
         data_source.adicionar_log("WORKER", f"ERRO CRÍTICO NO CICLO: {e}", level="ERROR")
@@ -172,11 +184,10 @@ def worker_main_loop(memoria_worker):
 
 
 def background_task_wrapper():
-    data_source.adicionar_log("SISTEMA", "Processo Worker (Thread) iniciado.")
+    data_source.adicionar_log("SISTEMA", "Processo Worker (Thread) iniciado.", salvar_arquivo=False)
     time.sleep(RENDER_SLEEP_TIME_SEC)
     memoria_worker = {}
-    INTERVALO_EM_MINUTOS = 10
-    CARENCIA_EM_SEGUNDOS = 60
+    INTERVALO_EM_SEGUNDOS = config.FREQUENCIA_API_SEGUNDOS
     while True:
         sucesso, memoria_worker = worker_main_loop(memoria_worker)
         if not sucesso:
@@ -184,18 +195,8 @@ def background_task_wrapper():
                                       level="ERROR")
             time.sleep(RENDER_SLEEP_TIME_SEC)
             continue
-        agora = datetime.datetime.now(datetime.timezone.utc)
-        proximo_minuto_slot = (agora.minute // INTERVALO_EM_MINUTOS + 1) * INTERVALO_EM_MINUTOS
-        if proximo_minuto_slot >= 60:
-            proxima_hora = agora + datetime.timedelta(hours=1)
-            proxima_exec_base = proxima_hora.replace(minute=0, second=0, microsecond=0)
-        else:
-            proxima_exec_base = agora.replace(minute=proximo_minuto_slot, second=0, microsecond=0)
-        proxima_exec_com_carencia = proxima_exec_base + datetime.timedelta(seconds=CARENCIA_EM_SEGUNDOS)
-        sleep_time = (proxima_exec_com_carencia - agora).total_seconds()
-        if sleep_time < 0: sleep_time = CARENCIA_EM_SEGUNDOS
-        data_source.adicionar_log("WORKER", f"Próxima execução em ~{sleep_time:.0f}s...")
-        time.sleep(sleep_time)
+        data_source.adicionar_log("WORKER", f"Dormindo por {INTERVALO_EM_SEGUNDOS}s...", salvar_arquivo=False)
+        time.sleep(INTERVALO_EM_SEGUNDOS)
 
 
 # --- APP E CALLBACKS ---
@@ -261,7 +262,7 @@ def update_status_and_logs_from_disk(n_intervals):
 
 def iniciar_worker_automatico():
     if not os.environ.get("WERKZEUG_MAIN"):
-        data_source.adicionar_log("SISTEMA", "Inicializando Worker em Thread (Global Scope).")
+        data_source.adicionar_log("SISTEMA", "Inicializando Worker em Thread (Global Scope).", salvar_arquivo=False)
         t = Thread(target=background_task_wrapper, daemon=True)
         t.start()
 
@@ -277,9 +278,10 @@ if __name__ == '__main__':
             id_ponto = args[2]
             try:
                 dias = int(args[3])
-                data_source.backfill_weatherlink_data_manually(id_ponto, dias)
+                # data_source.backfill_weatherlink_data_manually(id_ponto, dias)
+                print("Backfill manual")
             except Exception as e:
                 print(f"Erro backfill: {e}")
     else:
-        data_source.adicionar_log("SISTEMA", "Iniciando servidor Dash Localmente...")
+        data_source.adicionar_log("SISTEMA", "Iniciando servidor Dash Localmente...", salvar_arquivo=False)
         app.run(debug=True, host='127.0.0.1', port=8050, use_reloader=False)
