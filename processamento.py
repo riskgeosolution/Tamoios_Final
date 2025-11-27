@@ -61,12 +61,14 @@ def calcular_acumulado_rolling(df_ponto, horas=72):
             df_pt.loc[mask_virada_dia, 'chuva_real_incremental'] = df_pt.loc[
                 mask_virada_dia, 'precipitacao_acumulada_mm']
 
-            # 4. Agora temos a chuva exata. Fazemos a soma Rolling de 72h.
+            # 4. Agora temos a chuva exata. Fazemos a soma Rolling.
             # Resample para 10T para garantir a grade temporal correta
             df_resampled = df_pt['chuva_real_incremental'].resample('10T').sum().fillna(0)
 
-            # Janela de 72h (72 * 6 blocos de 10min = 432)
-            acumulado_rolling = df_resampled.rolling(window=432, min_periods=1).sum()
+            # --- CORREÇÃO APLICADA AQUI ---
+            # A janela agora é dinâmica, baseada no parâmetro 'horas'
+            window_size = int(horas * 6)  # 6 blocos de 10min por hora
+            acumulado_rolling = df_resampled.rolling(window=window_size, min_periods=1).sum()
 
             temp_df = acumulado_rolling.to_frame(name='chuva_mm')
             temp_df['id_ponto'] = ponto_id

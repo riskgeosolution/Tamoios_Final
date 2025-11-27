@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO v2 - Otimização de Memória)
+# pages/general_dash.py (CORRIGIDO v3 - Correção do Gráfico)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -80,8 +80,9 @@ def update_general_dashboard(n_intervals, selected_hours):
         if all(c in df_ponto.columns for c in umidade_cols):
             df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
-        df_chuva_72h_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=72)
-        df_chuva_periodo_completo = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
+        # --- CORREÇÃO APLICADA AQUI ---
+        # 1. Calcular o acumulado APENAS UMA VEZ usando o seletor de tempo
+        df_chuva_acumulada = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
 
         ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
         limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
@@ -96,27 +97,22 @@ def update_general_dashboard(n_intervals, selected_hours):
 
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg(agg_dict).reset_index()
 
-        df_chuva_72h_plot = df_chuva_72h_completo[
-            df_chuva_72h_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
-        df_chuva_periodo_plot = df_chuva_periodo_completo[
-            df_chuva_periodo_completo['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
+        # 2. Filtrar o DataFrame já calculado para o período de plotagem
+        df_chuva_acumulada_plot = df_chuva_acumulada[
+            df_chuva_acumulada['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
 
-        for df in [df_chuva_72h_plot, df_chuva_periodo_plot]:
-            if 'timestamp' in df.columns:
-                if df['timestamp'].dt.tz is None: df.loc[:, 'timestamp'] = df['timestamp'].dt.tz_localize('UTC')
-                df.loc[:, 'timestamp_local'] = df['timestamp'].dt.tz_convert('America/Sao_Paulo')
+        if 'timestamp' in df_chuva_acumulada_plot.columns:
+            if df_chuva_acumulada_plot['timestamp'].dt.tz is None: df_chuva_acumulada_plot.loc[:, 'timestamp'] = df_chuva_acumulada_plot['timestamp'].dt.tz_localize('UTC')
+            df_chuva_acumulada_plot.loc[:, 'timestamp_local'] = df_chuva_acumulada_plot['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
         # --- GRÁFICO DE CHUVA ---
         fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
         fig_chuva.add_trace(go.Bar(x=df_plot_15min['timestamp_local'], y=df_plot_15min['chuva_mm'], name='Pluv. 15 min',
                                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
-        fig_chuva.add_trace(go.Scatter(x=df_chuva_periodo_plot['timestamp_local'], y=df_chuva_periodo_plot['chuva_mm'],
+        # 3. Usar o DataFrame correto no gráfico
+        fig_chuva.add_trace(go.Scatter(x=df_chuva_acumulada_plot['timestamp_local'], y=df_chuva_acumulada_plot['chuva_mm'],
                                        name=f'Acumulada ({selected_hours}h)', mode='lines',
                                        line=dict(color='#007BFF', width=2.5)), secondary_y=True)
-        fig_chuva.add_trace(
-            go.Scatter(x=df_chuva_72h_plot['timestamp_local'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
-                       mode='lines', line=dict(color='green', width=2, dash='dot'), visible='legendonly'),
-            secondary_y=True)
 
         fig_chuva.update_layout(
             title_text=f"Pluviometria - {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO,
