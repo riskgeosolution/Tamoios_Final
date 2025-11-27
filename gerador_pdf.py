@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import threading
 import traceback
 import matplotlib
+import numpy as np
 
 matplotlib.use('Agg')
 
@@ -30,28 +31,56 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
     df_brutos = data_source.read_data_from_sqlite(id_ponto, start_dt, end_dt)
     if df_brutos.empty: return pd.DataFrame()
 
-    cols_para_numeric = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+    # --- CORREÇÃO: INCLUÍDO precipitacao_acumulada_mm NA CONVERSÃO ---
+    cols_para_numeric = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc',
+                         'umidade_3m_perc']
     for col in cols_para_numeric:
         if col in df_brutos.columns:
             df_brutos[col] = pd.to_numeric(df_brutos[col], errors='coerce')
 
+    # Ordena para garantir cálculo correto do diff
+    df_brutos = df_brutos.sort_values('timestamp')
+
+    # --- LÓGICA DE CÁLCULO DA CHUVA REAL (Igual ao processamento.py) ---
+    if 'precipitacao_acumulada_mm' in df_brutos.columns:
+        # Preenche buracos no acumulado para não quebrar o diff
+        df_brutos['precipitacao_acumulada_mm'] = df_brutos['precipitacao_acumulada_mm'].ffill().fillna(0)
+
+        # Calcula a diferença (Chuva Real)
+        df_brutos['chuva_calculada'] = df_brutos['precipitacao_acumulada_mm'].diff().fillna(0)
+
+        # Tratamento da Virada do Dia (Reset do Odômetro)
+        # Se o valor for negativo (ex: foi de 20mm para 0mm), a chuva real é o próprio valor novo
+        mask_virada = df_brutos['chuva_calculada'] < 0
+        df_brutos.loc[mask_virada, 'chuva_calculada'] = df_brutos.loc[mask_virada, 'precipitacao_acumulada_mm']
+    else:
+        # Fallback se não tiver acumulado (usa a coluna bruta, mesmo que seja zero)
+        df_brutos['chuva_calculada'] = df_brutos.get('chuva_mm', 0)
+
     df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
     # Agrega os dados (Reamostragem em 10 minutos)
+    # --- CORREÇÃO: AGORA SOMAMOS A 'chuva_calculada' E NÃO 'chuva_mm' ---
     df_consolidado = df_brutos.set_index('timestamp_local').resample('10T').agg({
-        'chuva_mm': 'sum',
+        'chuva_calculada': 'sum',
         'umidade_1m_perc': 'mean',
         'umidade_2m_perc': 'mean',
         'umidade_3m_perc': 'mean'
-    })  # Não resetamos o index ainda para poder fazer o ffill corretamente
+    })
+
+    # Renomeia para manter compatibilidade com o resto do código
+    df_consolidado.rename(columns={'chuva_calculada': 'chuva_mm'}, inplace=True)
 
     # --- CORREÇÃO DOS BURACOS (FFILL) ---
     # Preenche vazios de umidade com o valor anterior
     cols_umidade = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
     df_consolidado[cols_umidade] = df_consolidado[cols_umidade].ffill()
 
-    # Chuva vazia deve ser 0
+    # Chuva vazia deve ser 0 (já que é soma)
     df_consolidado['chuva_mm'] = df_consolidado['chuva_mm'].fillna(0)
+
+    # Arredondamento final para estética
+    df_consolidado['chuva_mm'] = df_consolidado['chuva_mm'].round(2)
 
     return df_consolidado.reset_index()
 
@@ -66,11 +95,15 @@ def criar_relatorio_excel_em_memoria(df_consolidado, nome_ponto):
         })
         colunas_export = ['Data e Hora (Local)', 'Chuva (mm)', 'Umidade 1m (%)', 'Umidade 2m (%)', 'Umidade 3m (%)']
         df_relatorio = df_relatorio[colunas_export]
+        # Remove fuso horário para o Excel não reclamar
         df_relatorio['Data e Hora (Local)'] = df_relatorio['Data e Hora (Local)'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
         df_relatorio.to_excel(writer, index=False, sheet_name=f'Dados_{nome_ponto}')
         worksheet = writer.sheets[f'Dados_{nome_ponto}']
         for i, col in enumerate(df_relatorio.columns):
-            column_len = max(df_relatorio[col].astype(str).map(len).max(), len(col)) + 2
+            # Ajuste de largura da coluna
+            max_len = df_relatorio[col].astype(str).map(len).max()
+            column_len = max(max_len, len(col)) + 2
             worksheet.set_column(i, i, column_len)
     return output.getvalue()
 
@@ -93,19 +126,30 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto):
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 10, "Registros Consolidados (a cada 10 minutos)", ln=True, align="L")
-    df_tabela = df_consolidado.tail(40).copy()
+
+    # Pega os últimos registros para a tabela (ou todos se quiser, aqui limitei a 45 para caber numa página exemplo)
+    # Se quiser TODA a tabela no PDF, precisaria de um loop de páginas, mas para resumo mantive o tail ou aumente.
+    # Vou deixar o tail(60) para mostrar mais dados recentes.
+    df_tabela = df_consolidado.tail(60).copy()
+
     df_tabela['timestamp_local'] = df_tabela['timestamp_local'].dt.strftime('%d/%m/%y %H:%M')
     col_widths = [35, 35, 35, 35, 35]
     headers = ["Data/Hora", "Chuva (mm)", "Umidade 1m", "Umidade 2m", "Umidade 3m"]
+
     pdf.set_font("Helvetica", "B", 9)
     for w, h in zip(col_widths, headers):
         pdf.cell(w, 7, h, border=1, align="C")
     pdf.ln()
+
     pdf.set_font("Helvetica", "", 8)
     for _, row in df_tabela.iterrows():
         pdf.cell(col_widths[0], 6, str(row['timestamp_local']), border=1, align="C")
-        pdf.cell(col_widths[1], 6, f"{row['chuva_mm']:.2f}" if pd.notna(row['chuva_mm']) else '0.00', border=1,
-                 align="C")
+
+        # Formatação condicional simples para chuva > 0 ficar negrito ou visualmente diferente se quisesse
+        valor_chuva = row['chuva_mm']
+        if pd.isna(valor_chuva): valor_chuva = 0.0
+
+        pdf.cell(col_widths[1], 6, f"{valor_chuva:.2f}", border=1, align="C")
         pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}%" if pd.notna(row['umidade_1m_perc']) else '-',
                  border=1, align="C")
         pdf.cell(col_widths[3], 6, f"{row['umidade_2m_perc']:.1f}%" if pd.notna(row['umidade_2m_perc']) else '-',
@@ -113,6 +157,7 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto):
         pdf.cell(col_widths[4], 6, f"{row['umidade_3m_perc']:.1f}%" if pd.notna(row['umidade_3m_perc']) else '-',
                  border=1, align="C")
         pdf.ln()
+
     return pdf.output(dest='S')
 
 
@@ -135,37 +180,62 @@ def _add_matplotlib_fig(pdf, fig, base_title, periodo_str):
 
 def _criar_graficos_pdf(df_consolidado, nome_ponto):
     fig_chuva, ax1 = plt.subplots(figsize=(10, 5))
-    ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#5F6B7C', alpha=0.8,
-            label='Pluv. (mm/10min)', width=1 / (96 * 1.5))
+
+    # Barras de chuva (agora usando o valor calculado correto)
+    ax1.bar(df_consolidado['timestamp_local'], df_consolidado['chuva_mm'], color='#2C3E50', alpha=0.8,
+            label='Pluv. (mm/10min)', width=0.005)  # Ajuste width para datas se necessário
+
     ax1.set_xlabel("Data e Hora")
     ax1.set_ylabel("Pluviometria (mm/10min)", color='#2C3E50')
     ax1.tick_params(axis='x', rotation=45, labelsize=8)
     ax1.grid(True, linestyle='--', alpha=0.6)
+
+    # Linha de Acumulado
     ax2 = ax1.twinx()
-    df_consolidado['chuva_acum_72h'] = df_consolidado['chuva_mm'].rolling(window=432, min_periods=1).sum()
-    ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_72h'], color='#007BFF', linewidth=2.5,
-             label='Acumulada (72h)')
-    ax2.set_ylabel("Acumulada (72h)", color='#007BFF')
+    # Recalcula acumulado para o gráfico
+    df_consolidado['chuva_acum_periodo'] = df_consolidado['chuva_mm'].cumsum()
+
+    ax2.plot(df_consolidado['timestamp_local'], df_consolidado['chuva_acum_periodo'], color='#007BFF', linewidth=2.5,
+             label='Acumulado no Período')
+    ax2.set_ylabel("Acumulado (mm)", color='#007BFF')
+
     fig_chuva.suptitle(f"Pluviometria - Estação {nome_ponto}", fontsize=12)
+
+    # Legendas combinadas
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax2.legend(lines + lines2, labels + labels2, loc='upper center', ncol=2, fancybox=True, shadow=True,
                bbox_to_anchor=(0.5, -0.2))
     fig_chuva.tight_layout(rect=[0, 0.05, 1, 0.95])
 
+    # Gráfico de Umidade
     fig_umidade, ax_umidade = plt.subplots(figsize=(10, 5))
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_1m_perc'], label='1m',
-                    color=CORES_ALERTAS_CSS['verde'], linewidth=2)
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_2m_perc'], label='2m',
-                    color=CORES_ALERTAS_CSS['laranja'], linewidth=2)
-    ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_3m_perc'], label='3m',
-                    color=CORES_ALERTAS_CSS['vermelho'], linewidth=2)
+
+    tem_dados_umidade = False
+    if 'umidade_1m_perc' in df_consolidado.columns and df_consolidado['umidade_1m_perc'].notna().any():
+        ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_1m_perc'], label='1m',
+                        color=CORES_ALERTAS_CSS['verde'], linewidth=2)
+        tem_dados_umidade = True
+
+    if 'umidade_2m_perc' in df_consolidado.columns and df_consolidado['umidade_2m_perc'].notna().any():
+        ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_2m_perc'], label='2m',
+                        color=CORES_ALERTAS_CSS['laranja'], linewidth=2)
+        tem_dados_umidade = True
+
+    if 'umidade_3m_perc' in df_consolidado.columns and df_consolidado['umidade_3m_perc'].notna().any():
+        ax_umidade.plot(df_consolidado['timestamp_local'], df_consolidado['umidade_3m_perc'], label='3m',
+                        color=CORES_ALERTAS_CSS['vermelho'], linewidth=2)
+        tem_dados_umidade = True
+
     ax_umidade.set_title(f"Variação da Umidade do Solo - Estação {nome_ponto}", fontsize=12)
     ax_umidade.set_xlabel("Data e Hora")
     ax_umidade.set_ylabel("Umidade do Solo (%)")
     ax_umidade.grid(True, linestyle='--', alpha=0.6)
     ax_umidade.tick_params(axis='x', rotation=45, labelsize=8)
-    fig_umidade.legend(loc='upper center', ncol=3, fancybox=True, shadow=True, bbox_to_anchor=(0.5, -0.2))
+
+    if tem_dados_umidade:
+        fig_umidade.legend(loc='upper center', ncol=3, fancybox=True, shadow=True, bbox_to_anchor=(0.5, -0.2))
+
     fig_umidade.tight_layout(rect=[0, 0.05, 1, 0.95])
     return fig_chuva, fig_umidade
 
@@ -191,9 +261,6 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto):
         if df_consolidado.empty: raise Exception("Sem dados no período selecionado.")
         nome_ponto = PONTOS_DE_ANALISE.get(id_ponto, {}).get("nome", "Desconhecido")
         periodo_str = f"{pd.to_datetime(start_date).strftime('%d/%m/%Y')} a {pd.to_datetime(end_date).strftime('%d/%m/%Y')}"
-
-        status_json = data_source.get_status_from_disk()
-        status_info = status_json.get(id_ponto, {})
 
         pdf_buffer = criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto)
         nome_arquivo = f"Relatorio_{nome_ponto}_{datetime.now().strftime('%Y%m%d')}.pdf"
