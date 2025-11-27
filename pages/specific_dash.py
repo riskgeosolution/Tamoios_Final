@@ -206,7 +206,7 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
             df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
         df_completo['timestamp_local'] = df_completo['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-        numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+        numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc', 'precipitacao_acumulada_mm']
         for col in numeric_cols:
             if col in df_completo.columns:
                 df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -214,24 +214,42 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     except Exception as e:
         return dbc.Alert(f"Erro ao processar dados: {e}", color="danger"), id_ponto
 
-    df_ponto = df_completo.copy() # Não precisa mais filtrar por id_ponto
+    df_ponto = df_completo.copy()
     if df_ponto.empty:
         return dbc.Alert("Sem dados históricos para este ponto.", color="warning"), id_ponto
 
     df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
+    
+    # --- CÁLCULO DA CHUVA INCREMENTAL PARA O GRÁFICO DE BARRAS ---
+    if 'precipitacao_acumulada_mm' in df_ponto.columns:
+        # Garante ordenação e preenche valores nulos para o cálculo do diff
+        df_ponto = df_ponto.sort_values('timestamp').reset_index(drop=True)
+        df_ponto['precipitacao_acumulada_mm'] = df_ponto['precipitacao_acumulada_mm'].ffill().fillna(0)
+        
+        # Calcula a chuva incremental (diferença entre leituras)
+        df_ponto['chuva_incremental'] = df_ponto['precipitacao_acumulada_mm'].diff().fillna(0)
+        
+        # Corrige o reset da meia-noite (quando o acumulado zera e o diff se torna negativo)
+        mask_virada_dia = df_ponto['chuva_incremental'] < 0
+        df_ponto.loc[mask_virada_dia, 'chuva_incremental'] = df_ponto.loc[mask_virada_dia, 'precipitacao_acumulada_mm']
+    else:
+        # Fallback: se não houver 'precipitacao_acumulada_mm', usa 'chuva_mm' que pode já ser incremental
+        df_ponto['chuva_incremental'] = df_ponto.get('chuva_mm', 0)
+
     umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
     if all(c in df_ponto.columns for c in umidade_cols):
         df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
-    # --- CORREÇÃO APLICADA AQUI ---
-    # 1. Calcular o acumulado APENAS UMA VEZ usando o seletor de tempo
+    # 1. Calcular o acumulado para a linha do gráfico
     df_chuva_acumulada = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
 
+    # Filtra os dados para o período de tempo selecionado para plotagem
     ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
     limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
     df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
 
-    agg_dict = {'chuva_mm': 'sum'}
+    # Agrega os dados em intervalos de 10 minutos para o gráfico
+    agg_dict = {'chuva_incremental': 'sum'}
     if 'umidade_1m_perc' in df_ponto_plot.columns: agg_dict['umidade_1m_perc'] = 'mean'
     if 'umidade_2m_perc' in df_ponto_plot.columns: agg_dict['umidade_2m_perc'] = 'mean'
     if 'umidade_3m_perc' in df_ponto_plot.columns: agg_dict['umidade_3m_perc'] = 'mean'
@@ -239,11 +257,11 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     if not df_ponto_plot.empty:
         df_plot_10min = df_ponto_plot.set_index('timestamp_local').resample('10T').agg(agg_dict).reset_index()
         if all(c in df_plot_10min.columns for c in umidade_cols):
-            df_plot_10min[umidade_cols] = df_plot_10min[umidade_cols].ffill()
+            df_plot_10min[umidade_cols] = df_plot_10min[umidade_cols].interpolate(method='linear', limit_direction='forward')
     else:
-        df_plot_10min = pd.DataFrame(columns=['timestamp_local', 'chuva_mm'] + umidade_cols)
+        df_plot_10min = pd.DataFrame(columns=['timestamp_local', 'chuva_incremental'] + umidade_cols)
 
-    # 2. Filtrar o DataFrame já calculado para o período de plotagem
+    # 2. Filtrar o DataFrame de chuva acumulada para o período de plotagem
     df_chuva_acumulada_plot = df_chuva_acumulada[
         df_chuva_acumulada['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
 
@@ -253,8 +271,10 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     axis_style = dict(title="Data e Hora", dtick=10800000, tickformat="%H:%M\n%d/%b", tickangle=-45)
 
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
-    fig_chuva.add_trace(go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_mm'], name='Pluv. 10 min (mm)', marker_color='#2C3E50', opacity=0.8), secondary_y=False)
-    # 3. Usar o DataFrame correto no gráfico
+    # 3. Usar a nova coluna 'chuva_incremental' para as barras
+    fig_chuva.add_trace(go.Bar(x=df_plot_10min['timestamp_local'], y=df_plot_10min['chuva_incremental'], name='Pluv. 10 min (mm)', marker_color='#2C3E50', opacity=0.8), secondary_y=False)
+    
+    # 4. Usar o DataFrame de acumulado para a linha
     fig_chuva.add_trace(go.Scatter(x=df_chuva_acumulada_plot['timestamp_local'], y=df_chuva_acumulada_plot['chuva_mm'], name=f'Acumulada ({selected_hours}h)', mode='lines', line=dict(color='#007BFF', width=2.5)), secondary_y=True)
     
     fig_chuva.update_layout(title_text=f"Pluviometria - Estação {config['nome']}", template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=50, b=80), legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor='center', x=0.5), xaxis=axis_style, yaxis_title="Pluviometria (mm/10min)", yaxis2_title=f"Acumulada ({selected_hours}h)", hovermode="x unified")

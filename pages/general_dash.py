@@ -47,8 +47,7 @@ def update_general_dashboard(n_intervals, selected_hours):
     if selected_hours is None:
         return dbc.Spinner(size="lg", children="Carregando dados...")
 
-    # --- OTIMIZAÇÃO DE MEMÓRIA ---
-    # Carrega apenas os dados necessários, com uma margem para o cálculo de 72h.
+    # Otimização: Carrega apenas os dados necessários
     horas_para_buscar = max(selected_hours, 73)
     df_completo = data_source.read_data_from_sqlite(last_hours=horas_para_buscar)
 
@@ -61,7 +60,7 @@ def update_general_dashboard(n_intervals, selected_hours):
             df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
         df_completo['timestamp_local'] = df_completo['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-        numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
+        numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc', 'precipitacao_acumulada_mm']
         for col in numeric_cols:
             if col in df_completo.columns:
                 df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -75,29 +74,40 @@ def update_general_dashboard(n_intervals, selected_hours):
         if df_ponto.empty: continue
 
         df_ponto = df_ponto.sort_values('timestamp').drop_duplicates(subset=['timestamp'], keep='last')
+        
+        # --- CÁLCULO DA CHUVA INCREMENTAL ---
+        if 'precipitacao_acumulada_mm' in df_ponto.columns:
+            df_ponto = df_ponto.sort_values('timestamp').reset_index(drop=True)
+            df_ponto['precipitacao_acumulada_mm'] = df_ponto['precipitacao_acumulada_mm'].ffill().fillna(0)
+            df_ponto['chuva_incremental'] = df_ponto['precipitacao_acumulada_mm'].diff().fillna(0)
+            mask_virada_dia = df_ponto['chuva_incremental'] < 0
+            df_ponto.loc[mask_virada_dia, 'chuva_incremental'] = df_ponto.loc[mask_virada_dia, 'precipitacao_acumulada_mm']
+        else:
+            df_ponto['chuva_incremental'] = df_ponto.get('chuva_mm', 0)
 
         umidade_cols = ['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc']
         if all(c in df_ponto.columns for c in umidade_cols):
             df_ponto[umidade_cols] = df_ponto[umidade_cols].ffill()
 
-        # --- CORREÇÃO APLICADA AQUI ---
-        # 1. Calcular o acumulado APENAS UMA VEZ usando o seletor de tempo
+        # 1. Calcular o acumulado para a linha do gráfico
         df_chuva_acumulada = processamento.calcular_acumulado_rolling(df_ponto, horas=selected_hours)
 
+        # Filtra os dados para o período de tempo selecionado
         ultimo_timestamp_no_df = df_ponto['timestamp_local'].max()
         limite_tempo = ultimo_timestamp_no_df - pd.Timedelta(hours=selected_hours)
         df_ponto_plot = df_ponto[df_ponto['timestamp_local'] >= limite_tempo].copy()
 
         if df_ponto_plot.empty: continue
 
-        agg_dict = {'chuva_mm': 'sum'}
+        # Agrega os dados em intervalos de 15 minutos
+        agg_dict = {'chuva_incremental': 'sum'}
         if 'umidade_1m_perc' in df_ponto_plot.columns: agg_dict['umidade_1m_perc'] = 'mean'
         if 'umidade_2m_perc' in df_ponto_plot.columns: agg_dict['umidade_2m_perc'] = 'mean'
         if 'umidade_3m_perc' in df_ponto_plot.columns: agg_dict['umidade_3m_perc'] = 'mean'
 
         df_plot_15min = df_ponto_plot.set_index('timestamp_local').resample('15T').agg(agg_dict).reset_index()
 
-        # 2. Filtrar o DataFrame já calculado para o período de plotagem
+        # 2. Filtrar o DataFrame de chuva acumulada para o período de plotagem
         df_chuva_acumulada_plot = df_chuva_acumulada[
             df_chuva_acumulada['timestamp'] >= df_ponto_plot['timestamp'].min()].copy()
 
@@ -107,9 +117,11 @@ def update_general_dashboard(n_intervals, selected_hours):
 
         # --- GRÁFICO DE CHUVA ---
         fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_chuva.add_trace(go.Bar(x=df_plot_15min['timestamp_local'], y=df_plot_15min['chuva_mm'], name='Pluv. 15 min',
+        # 3. Usar a nova coluna 'chuva_incremental' para as barras
+        fig_chuva.add_trace(go.Bar(x=df_plot_15min['timestamp_local'], y=df_plot_15min['chuva_incremental'], name='Pluv. 15 min',
                                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
-        # 3. Usar o DataFrame correto no gráfico
+        
+        # 4. Usar o DataFrame de acumulado para a linha
         fig_chuva.add_trace(go.Scatter(x=df_chuva_acumulada_plot['timestamp_local'], y=df_chuva_acumulada_plot['chuva_mm'],
                                        name=f'Acumulada ({selected_hours}h)', mode='lines',
                                        line=dict(color='#007BFF', width=2.5)), secondary_y=True)
