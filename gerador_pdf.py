@@ -25,11 +25,9 @@ from config import PONTOS_DE_ANALISE, RISCO_MAP, STATUS_MAP_HIERARQUICO, CORES_A
 
 
 def _get_and_consolidate_data(start_date, end_date, id_ponto):
-    # Converte datas de entrada para UTC
     start_dt = pd.to_datetime(start_date).tz_localize('America/Sao_Paulo').tz_convert('UTC')
     end_dt = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).tz_localize('America/Sao_Paulo').tz_convert('UTC')
 
-    # OTIMIZAÇÃO: Pede apenas colunas reais e úteis
     cols_necessarias = [
         'timestamp', 'id_ponto', 'chuva_mm', 'precipitacao_acumulada_mm',
         'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'
@@ -44,7 +42,6 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
 
     if df_brutos.empty: return pd.DataFrame()
 
-    # Conversão segura de numéricos
     cols_para_numeric = ['chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc', 'umidade_2m_perc',
                          'umidade_3m_perc']
     for col in cols_para_numeric:
@@ -53,7 +50,6 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
 
     df_brutos = df_brutos.sort_values('timestamp')
 
-    # --- LÓGICA DE CÁLCULO DA CHUVA REAL ---
     if 'precipitacao_acumulada_mm' in df_brutos.columns:
         df_brutos['precipitacao_acumulada_mm'] = df_brutos['precipitacao_acumulada_mm'].ffill().fillna(0)
         df_brutos['chuva_calculada'] = df_brutos['precipitacao_acumulada_mm'].diff().fillna(0)
@@ -64,7 +60,6 @@ def _get_and_consolidate_data(start_date, end_date, id_ponto):
 
     df_brutos['timestamp_local'] = df_brutos['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
-    # Agrega os dados (Reamostragem em 10 minutos)
     df_consolidado = df_brutos.set_index('timestamp_local').resample('10T').agg({
         'chuva_calculada': 'sum',
         'umidade_1m_perc': 'mean',
@@ -143,6 +138,7 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto, logs
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
+    # --- CABEÇALHO ---
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"Relatório de Monitoramento - Estação {nome_ponto}", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
@@ -150,12 +146,35 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto, logs
     pdf.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True, align="C")
     pdf.ln(5)
 
+    # --- GRÁFICOS ---
+    try:
+        fig_chuva, fig_umidade = _criar_graficos_pdf(df_consolidado, nome_ponto)
+        _add_matplotlib_fig(pdf, fig_chuva, "Pluviometria", periodo_str)
+        _add_matplotlib_fig(pdf, fig_umidade, "Umidade do Solo", periodo_str)
+    except Exception as e:
+        pdf.cell(0, 5, f"Erro ao gerar gráficos: {str(e)}", ln=True)
+
+    pdf.ln(5)
+
+    # --- SEÇÃO: HISTÓRICO DE STATUS (SMART PAGE BREAK) ---
+
+    # CORREÇÃO: Verifica espaço disponível na página atual.
+    # Se restar menos de 40mm (aprox 4cm), força uma nova página.
+    # Isso evita que o cabeçalho fique no finalzinho da página sozinho.
+    espaco_restante = pdf.h - pdf.b_margin - pdf.get_y()
+    if espaco_restante < 40:
+        pdf.add_page()
+
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "B", 11)
+
+    pdf.set_x(pdf.l_margin)
     pdf.cell(0, 8, "Histórico de Alterações de Status no Período", ln=True, align="L", fill=True)
     pdf.ln(2)
 
     pdf.set_font("Courier", "", 9)
+    largura_util = pdf.w - pdf.l_margin - pdf.r_margin
+
     for linha_status in logs_status_periodo:
         if "PARALIZAÇÃO" in linha_status.upper() or "ALERTA" in linha_status.upper():
             pdf.set_text_color(200, 0, 0)
@@ -163,15 +182,16 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto, logs
             pdf.set_text_color(200, 100, 0)
         else:
             pdf.set_text_color(0, 0, 0)
-        pdf.multi_cell(0, 5, linha_status)
+
+        texto_seguro = str(linha_status).encode('latin-1', 'replace').decode('latin-1')
+
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w=largura_util, h=5, txt=texto_seguro)
 
     pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
 
-    fig_chuva, fig_umidade = _criar_graficos_pdf(df_consolidado, nome_ponto)
-    _add_matplotlib_fig(pdf, fig_chuva, "Pluviometria", periodo_str)
-    _add_matplotlib_fig(pdf, fig_umidade, "Umidade do Solo", periodo_str)
-
+    # --- TABELA DE DADOS ---
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 10, "Registros Consolidados (Amostra Recente)", ln=True, align="L")
@@ -189,13 +209,17 @@ def criar_relatorio_pdf_em_memoria(df_consolidado, periodo_str, nome_ponto, logs
     pdf.set_font("Helvetica", "", 8)
     for _, row in df_tabela.iterrows():
         pdf.cell(col_widths[0], 6, str(row['timestamp_local']), border=1, align="C")
+
         valor_chuva = row['chuva_mm']
         if pd.isna(valor_chuva): valor_chuva = 0.0
+
         if valor_chuva > 0:
             pdf.set_font("Helvetica", "B", 8)
         else:
             pdf.set_font("Helvetica", "", 8)
+
         pdf.cell(col_widths[1], 6, f"{valor_chuva:.2f}", border=1, align="C")
+
         pdf.set_font("Helvetica", "", 8)
         pdf.cell(col_widths[2], 6, f"{row['umidade_1m_perc']:.1f}%" if pd.notna(row['umidade_1m_perc']) else '-',
                  border=1, align="C")
@@ -310,7 +334,7 @@ def thread_gerar_pdf(task_id, start_date, end_date, id_ponto):
     except Exception as e:
         traceback.print_exc()
         with PDF_CACHE_LOCK:
-            PDF_CACHE[task_id] = {"status": "erro", "message": str(e)}
+            PDF_CACHE[task_id] = {"status": "erro", "message": f"Erro interno ao gerar PDF: {str(e)}"}
 
 
 def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
@@ -323,6 +347,9 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
     pdf.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True, align="C")
     pdf.ln(5)
     pdf.set_font("Courier", size=8)
+
+    largura = pdf.w - 20
+
     for log_str in reversed(logs_filtrados):
         log_str_sanitizado = log_str.encode('latin-1', 'replace').decode('latin-1')
         try:
@@ -340,8 +367,10 @@ def criar_relatorio_logs_em_memoria(nome_ponto, logs_filtrados):
             elif "MUDANÇA" in msg_str:
                 cor = (0, 0, 200)
             pdf.set_text_color(*cor)
-            pdf.write(5, f"[{timestamp_formatado}] {ponto_str}: {msg_str}\n")
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(largura, 5, f"[{timestamp_formatado}] {ponto_str}: {msg_str}\n")
         except Exception:
             pdf.set_text_color(0, 0, 0)
-            pdf.write(5, log_str_sanitizado + "\n")
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(largura, 5, log_str_sanitizado + "\n")
     return pdf.output(dest='S')

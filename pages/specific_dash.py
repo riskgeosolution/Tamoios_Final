@@ -404,8 +404,11 @@ def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
         logs_filtrados = []
 
     config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
+
+    # CORREÇÃO: pdf_buffer já são os bytes, não um buffer
     pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
-    return dcc.send_bytes(lambda f: f.write(pdf_buffer.getvalue()),
+
+    return dcc.send_bytes(lambda f: f.write(pdf_buffer),
                           f"Logs_{config['nome']}_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf")
 
 
