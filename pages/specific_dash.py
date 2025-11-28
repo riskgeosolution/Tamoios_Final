@@ -60,6 +60,7 @@ def filtrar_logs_cliente(logs_list):
 
 
 def get_layout():
+    """ Retorna o layout da página de dashboard específico. """
     opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 84, 96]
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico (Máx 7 dias)', 'value': 7 * 24}]
@@ -396,7 +397,12 @@ def load_logs_content(is_open, id_ponto, logs_data):
 @app.callback(Output('download-pdf-logs', 'data'), Input('btn-pdf-logs', 'n_clicks'),
               [State('store-id-ponto-ativo', 'data'), State('store-logs-filtrados', 'data')], prevent_initial_call=True)
 def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
-    if not n_clicks or not id_ponto or not logs_filtrados: return dash.no_update
+    if not n_clicks or not id_ponto: return dash.no_update
+
+    # Se a lista vier None ou vazia, trata como lista vazia (para gerar o PDF vazio mas com cabeçalho)
+    if logs_filtrados is None:
+        logs_filtrados = []
+
     config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
     pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
     return dcc.send_bytes(lambda f: f.write(pdf_buffer.getvalue()),

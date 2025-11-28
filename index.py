@@ -1,5 +1,3 @@
-# index.py (CORREÇÃO FINAL v19 - Proteção contra overwrite no KM 72)
-
 import dash
 from dash import html, dcc, callback, Input, Output, State
 from dash.exceptions import PreventUpdate
@@ -31,24 +29,21 @@ from config import RENDER_SLEEP_TIME_SEC
 SENHA_CLIENTE = '@Tamoiosv1'
 SENHA_ADMIN = 'admin456'
 
+# Garante que o banco e caminhos estão configurados ao iniciar
 data_source.setup_disk_paths()
 data_source.initialize_database()
 
 
-# --- NOVA FUNÇÃO DE SEGURANÇA ---
 def get_first_valid(series):
     """
     Retorna o primeiro valor VÁLIDO (não nulo).
     Isso impede que um NaN novo apague um número antigo no banco.
+    Mantido inalterado para garantir a integridade dos dados do KM 72.
     """
-    # Remove valores nulos da série e pega o primeiro que sobrar
     valid_values = series.dropna()
     if not valid_values.empty:
         return valid_values.iloc[0]
     return None
-
-
-# --------------------------------
 
 
 # --- FUNÇÕES DO WORKER ---
@@ -83,19 +78,28 @@ def worker_main_loop(memoria_worker):
     try:
         data_source.adicionar_log("WORKER", "Início do ciclo de processamento.", salvar_arquivo=False)
 
-        # 1. Busca histórico para garantir base de dados
-        historico_recente_df = data_source.get_recent_data_for_worker(hours=75)
+        # --- OTIMIZAÇÃO DE MEMÓRIA (A ÚNICA MUDANÇA REAL) ---
+        # Lista explícita das colunas necessárias para o Worker funcionar.
+        # Isso evita carregar colunas desnecessárias e previne o erro de memória no Render.
+        cols_necessarias_worker = [
+            'timestamp', 'id_ponto', 'chuva_mm', 'precipitacao_acumulada_mm',
+            'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc',
+            'base_1m', 'base_2m', 'base_3m'
+        ]
+
+        # 1. Busca histórico (Agora usando o filtro de colunas para economizar RAM)
+        historico_recente_df = data_source.get_recent_data_for_worker(
+            hours=75,
+            colunas=cols_necessarias_worker
+        )
+
         status_antigos_do_disco = data_source.get_status_from_disk()
 
-        # 2. Coleta Novos Dados
-        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api()  # Removido argumento extra se n houver suporte
-        # Se sua função fetch aceita memoria, mantenha. Se não, use a linha acima.
-        # Assumindo padrão do data_source.py atual:
-        # novos_dados_chuva_df, _, _ = data_source.fetch_data_from_weatherlink_api()
-
+        # 2. Coleta Novos Dados (Lógica API INALTERADA)
+        novos_dados_chuva_df, novos_acumulados_chuva = data_source.fetch_data_from_weatherlink_api()
         df_umidade_incremental = data_source.fetch_data_from_zentra_cloud()
 
-        # 3. Merge com Proteção
+        # 3. Merge com Proteção (Lógica de Fusão INALTERADA)
         df_combinado = pd.concat([novos_dados_chuva_df, df_umidade_incremental, historico_recente_df],
                                  ignore_index=True)
         df_combinado['timestamp'] = pd.to_datetime(df_combinado['timestamp'], errors='coerce')
@@ -107,12 +111,14 @@ def worker_main_loop(memoria_worker):
             if col in df_combinado.columns:
                 df_combinado[col] = pd.to_numeric(df_combinado[col], errors='coerce')
 
-        # AQUI APLICA A PROTEÇÃO: Usa get_first_valid em vez de 'first'
+        # AQUI MANTEMOS A PROTEÇÃO CRÍTICA DO KM 72 (get_first_valid)
         agg_funcs = {col: get_first_valid for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
         df_final = df_combinado.groupby(['timestamp', 'id_ponto'], as_index=False).agg(agg_funcs)
 
-        data_source.save_to_sqlite(df_final)  # Usando save_to_sqlite (compativel com seu data_source atual)
+        # 4. Salva no Banco
+        data_source.save_to_sqlite(df_final)
 
+        # 5. Cálculo de Status (Lógica de Negócio INALTERADA)
         historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
         status_atualizado = {}
 
@@ -142,6 +148,8 @@ def worker_main_loop(memoria_worker):
                         ultima_leitura_valida = df_com_umidade.sort_values('timestamp').iloc[-1]
                         ts_leitura = ultima_leitura_valida['timestamp']
                         agora = pd.Timestamp.now(tz='UTC')
+
+                        # Verifica se o dado é recente (< 3 horas)
                         if (agora - ts_leitura) < pd.Timedelta(hours=3):
                             ponto_info['umidade_1m'] = round(ultima_leitura_valida.get('umidade_1m_perc'),
                                                              1) if pd.notna(
@@ -256,6 +264,7 @@ def toggle_interval_update(session_data):
               [Input('intervalo-atualizacao-dados', 'n_intervals')])
 def update_status_and_logs_from_disk(n_intervals):
     status = data_source.get_status_from_disk()
+    # Usa a nova função que retorna lista para o front-end
     logs = data_source.ler_logs_eventos("GERAL")
     return status, logs
 
@@ -278,7 +287,6 @@ if __name__ == '__main__':
             id_ponto = args[2]
             try:
                 dias = int(args[3])
-                # data_source.backfill_weatherlink_data_manually(id_ponto, dias)
                 print("Backfill manual")
             except Exception as e:
                 print(f"Erro backfill: {e}")
