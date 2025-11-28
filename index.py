@@ -29,6 +29,7 @@ from config import RENDER_SLEEP_TIME_SEC
 SENHA_CLIENTE = '@Tamoiosv1'
 SENHA_ADMIN = 'admin456'
 
+# Garante que o banco e caminhos estão configurados ao iniciar
 data_source.setup_disk_paths()
 data_source.initialize_database()
 
@@ -76,14 +77,13 @@ def worker_main_loop(memoria_worker):
     try:
         data_source.adicionar_log("WORKER", "Início do ciclo de processamento.", salvar_arquivo=False)
 
-        # --- OTIMIZAÇÃO DE MEMÓRIA (CORRIGIDA) ---
-        # Removidas as colunas 'base_1m', 'base_2m', 'base_3m' que não existem no DB
+        # OTIMIZAÇÃO: Carrega apenas colunas vitais e reais (sem base_Xm)
         cols_necessarias_worker = [
             'timestamp', 'id_ponto', 'chuva_mm', 'precipitacao_acumulada_mm',
             'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'
         ]
 
-        # 1. Busca histórico (Agora usando o filtro de colunas para economizar RAM)
+        # 1. Busca histórico
         historico_recente_df = data_source.get_recent_data_for_worker(
             hours=75,
             colunas=cols_necessarias_worker
@@ -111,8 +111,13 @@ def worker_main_loop(memoria_worker):
         agg_funcs = {col: get_first_valid for col in df_combinado.columns if col not in ['timestamp', 'id_ponto']}
         df_final = df_combinado.groupby(['timestamp', 'id_ponto'], as_index=False).agg(agg_funcs)
 
-        data_source.save_to_sqlite(df_final)
+        # --- CORREÇÃO CRÍTICA AQUI ---
+        # Usamos upsert_data para substituir os dados antigos pelos novos (corrigidos/mergeados)
+        # em vez de adicionar duplicatas infinitas.
+        data_source.upsert_data(df_final)
+        # -----------------------------
 
+        # 5. Cálculo de Status
         historico_para_calculo = df_final.sort_values('timestamp').reset_index(drop=True)
         status_atualizado = {}
 
@@ -154,7 +159,6 @@ def worker_main_loop(memoria_worker):
                                 ultima_leitura_valida.get('umidade_3m_perc')) else None
                             ponto_info['timestamp_local'] = ts_leitura.tz_convert('America/Sao_Paulo').isoformat()
 
-                            # CÁLCULO DINÂMICO DAS BASES (Mínimo das últimas 72h)
                             bases = {f'base_{d}m': df_com_umidade[f'umidade_{d}m_perc'].min() for d in [1, 2, 3]}
                             for d in [1, 2, 3]:
                                 if pd.isna(bases[f'base_{d}m']): bases[f'base_{d}m'] = CONSTANTES_PADRAO[
