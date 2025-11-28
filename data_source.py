@@ -41,7 +41,7 @@ COLUNAS_HISTORICO = [
 ]
 
 
-# --- FUNÇÃO DE CAMINHO SEGURO (CORREÇÃO) ---
+# --- FUNÇÃO DE CAMINHO SEGURO (Persistência no Render) ---
 def get_base_path():
     """
     Retorna o caminho base correto.
@@ -49,10 +49,8 @@ def get_base_path():
     Se estiver local, usa o diretório atual.
     """
     if os.environ.get('RENDER'):
-        # Verifica se o diretório existe apenas por segurança, mas confia na env
         if os.path.exists("/var/data"):
             return "/var/data"
-        # Fallback se a montagem falhar (muito raro)
         return os.getcwd()
     return os.getcwd()
 
@@ -61,7 +59,6 @@ def get_base_path():
 def write_with_timeout(file_path, content, mode='w', timeout=15):
     def target():
         try:
-            # Usa o caminho base correto (persistente no Render)
             base = get_base_path()
             full_file_path = os.path.join(base, file_path)
 
@@ -91,21 +88,20 @@ def adicionar_log(id_ponto, mensagem, level="INFO", salvar_arquivo=True):
         log_entry = f"{datetime.datetime.now(datetime.timezone.utc).isoformat()} | {level:<5} | {id_ponto} | {mensagem}\n"
         print(log_entry.strip())
 
-        # Só escreve no disco se salvar_arquivo for True
         if salvar_arquivo:
             write_with_timeout(LOG_FILE, log_entry, mode='a', timeout=10)
     except Exception as e:
         print(f"ERRO CRÍTICO AO LOGAR: {e}")
 
 
-# --- FUNÇÃO DE LEITURA DE LOGS (CORRIGIDA) ---
+# --- FUNÇÃO DE LEITURA DE LOGS (Retorna Lista Limpa) ---
 def ler_logs_eventos(id_ponto):
     try:
         base = get_base_path()
         full_log_file_path = os.path.join(base, LOG_FILE)
 
         if not os.path.exists(full_log_file_path):
-            return []  # Retorna lista vazia se arquivo não existir
+            return []
 
         with open(full_log_file_path, 'r', encoding='utf-8') as f:
             logs_str = f.read()
@@ -125,7 +121,7 @@ def ler_logs_eventos(id_ponto):
 
 
 def setup_disk_paths():
-    """ Define conexão. Usa DATABASE_URL (Postgres) ou SQLite local. """
+    """ Define conexão DB. """
     global DB_CONNECTION_STRING, DB_ENGINE
 
     DB_CONNECTION_STRING = os.getenv("DATABASE_URL", "sqlite:///temp_local_db.db")
@@ -169,18 +165,12 @@ def initialize_database():
         with DB_ENGINE.connect() as connection:
             if 'idx_timestamp' not in existing_indexes:
                 try:
-                    connection.execute(
-                        text(f'CREATE INDEX idx_timestamp ON {DB_TABLE_NAME} (timestamp)'));
-                    adicionar_log("DB",
-                                  "Índice 'idx_timestamp' criado.",
-                                  salvar_arquivo=False)
+                    connection.execute(text(f'CREATE INDEX idx_timestamp ON {DB_TABLE_NAME} (timestamp)'))
                 except Exception:
                     pass
             if 'idx_id_ponto' not in existing_indexes:
                 try:
-                    connection.execute(text(f'CREATE INDEX idx_id_ponto ON {DB_TABLE_NAME} (id_ponto)'));
-                    adicionar_log(
-                        "DB", "Índice 'idx_id_ponto' criado.", salvar_arquivo=False)
+                    connection.execute(text(f'CREATE INDEX idx_id_ponto ON {DB_TABLE_NAME} (id_ponto)'))
                 except Exception:
                     pass
             connection.commit()
@@ -192,10 +182,8 @@ def initialize_database():
 
 def upsert_data(df_novos_dados):
     if df_novos_dados.empty: return
-    # 1. Deletar conflitantes
     timestamps = df_novos_dados['timestamp'].unique()
     delete_from_sqlite(timestamps)
-    # 2. Salvar novos
     save_to_sqlite(df_novos_dados)
 
 
@@ -239,10 +227,16 @@ def delete_from_sqlite(timestamps):
         traceback.print_exc()
 
 
-def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None):
+# --- OTIMIZAÇÃO DE LEITURA (SELECT COLUNAS) ---
+def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=None, colunas=None):
     global DB_ENGINE
 
-    query_base = f"SELECT * FROM {DB_TABLE_NAME}"
+    # Se colunas forem passadas, seleciona apenas elas. Caso contrário, SELECT *
+    cols_str = "*"
+    if colunas and isinstance(colunas, list):
+        cols_str = ", ".join(colunas)
+
+    query_base = f"SELECT {cols_str} FROM {DB_TABLE_NAME}"
     conditions = []
     params = {}
 
@@ -263,10 +257,12 @@ def read_data_from_sqlite(id_ponto=None, start_dt=None, end_dt=None, last_hours=
         if 'timestamp' in df.columns and not df.empty:
             if df['timestamp'].dt.tz is None: df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
 
-            ultimo = df['timestamp'].max()
-            ponto_log = id_ponto if id_ponto else 'GLOBAL'
-            adicionar_log("DB_READ", f"Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}", level="INFO",
-                          salvar_arquivo=False)
+            # Log reduzido para não poluir em leituras frequentes
+            if not colunas:
+                ultimo = df['timestamp'].max()
+                ponto_log = id_ponto if id_ponto else 'GLOBAL'
+                adicionar_log("DB_READ", f"Leitura: {ponto_log} | Linhas: {len(df)} | Último: {ultimo}", level="INFO",
+                              salvar_arquivo=False)
 
         return df
     except Exception as e:
@@ -280,17 +276,11 @@ def get_recent_data_for_worker(hours=73): return read_data_from_sqlite(last_hour
 def get_all_data_for_dashboard():
     df_completo = read_data_from_sqlite(last_hours=100)
     status_atual = get_status_from_disk()
-
-    # Usa a nova função de logs
     logs = ler_logs_eventos("GERAL")
-
-    # Se precisar retornar logs como string única para compatibilidade antiga
     logs_str = "\n".join(logs) if isinstance(logs, list) else str(logs)
-
     return df_completo, status_atual, logs_str
 
 
-# --- CORREÇÃO NO STATUS DISK ---
 def get_status_from_disk():
     try:
         base = get_base_path()
@@ -407,11 +397,7 @@ def fetch_data_from_zentra_cloud():
         return pd.DataFrame()
 
 
-# Mantive as funções de backfill vazias/antigas apenas se forem chamadas,
-# mas a lógica principal está acima.
-def backfill_zentra_km72_data():
-    pass
+def backfill_zentra_km72_data(): pass
 
 
-def backfill_weatherlink_data(id_ponto):
-    pass
+def backfill_weatherlink_data(id_ponto): pass

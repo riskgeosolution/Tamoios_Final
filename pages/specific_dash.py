@@ -34,12 +34,10 @@ from gerador_pdf import PDF_CACHE_LOCK, EXCEL_CACHE_LOCK, PDF_CACHE, EXCEL_CACHE
 def filtrar_logs_cliente(logs_list):
     """
     Filtra a lista de logs para exibir apenas o que é relevante para o cliente final.
-    Remove ruídos técnicos como 'DB', 'API', 'Worker', etc.
     """
     if not logs_list:
         return []
 
-    # Palavras-chave que o cliente PRECISA ver
     palavras_chave_permitidas = [
         "MUDANÇA DE STATUS",
         "PARALIZAÇÃO",
@@ -50,12 +48,8 @@ def filtrar_logs_cliente(logs_list):
 
     logs_limpos = []
     for log in logs_list:
-        # Se for string, verifica. Se não, ignora.
         if isinstance(log, str):
-            # Transforma em maiúsculas para garantir que pegamos independente da formatação
             log_upper = log.upper()
-
-            # Só adiciona se tiver uma das palavras chaves
             if any(chave in log_upper for chave in palavras_chave_permitidas):
                 logs_limpos.append(log)
 
@@ -66,14 +60,13 @@ def filtrar_logs_cliente(logs_list):
 
 
 def get_layout():
-    """ Retorna o layout da página de dashboard específico. """
     opcoes_tempo_lista = [1, 3, 6, 12, 18, 24, 48, 72, 84, 96]
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in opcoes_tempo_lista] + [
         {'label': 'Todo o Histórico (Máx 7 dias)', 'value': 7 * 24}]
 
     layout = dbc.Container([
         dcc.Store(id='store-id-ponto-ativo'),
-        dcc.Store(id='store-logs-filtrados'),  # Guardará os logs JÁ filtrados para o cliente
+        dcc.Store(id='store-logs-filtrados'),
         dcc.Store(id='pdf-task-id-store'),
         dcc.Store(id='excel-task-id-store'),
         dcc.Interval(id='pdf-check-interval', interval=2 * 1000, n_intervals=0, disabled=True),
@@ -228,8 +221,21 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
     if not config:
         return dbc.Alert("Ponto não encontrado.", color="danger"), id_ponto
 
+    # OTIMIZAÇÃO 1: Define quais colunas precisamos.
+    cols_necessarias = [
+        'timestamp', 'id_ponto',
+        'chuva_mm', 'precipitacao_acumulada_mm',
+        'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'
+    ]
+
     horas_para_buscar = max(selected_hours, 73)
-    df_completo = data_source.read_data_from_sqlite(id_ponto=id_ponto, last_hours=horas_para_buscar)
+
+    # OTIMIZAÇÃO 2: Passa a lista de colunas
+    df_completo = data_source.read_data_from_sqlite(
+        id_ponto=id_ponto,
+        last_hours=horas_para_buscar,
+        colunas=cols_necessarias
+    )
 
     try:
         if df_completo.empty or 'timestamp' not in df_completo.columns:
@@ -240,11 +246,12 @@ def update_specific_graphs(n_intervals, pathname, selected_hours):
             df_completo['timestamp'] = df_completo['timestamp'].dt.tz_localize('UTC')
         df_completo['timestamp_local'] = df_completo['timestamp'].dt.tz_convert('America/Sao_Paulo')
 
+        # OTIMIZAÇÃO 3: Downcast para float32
         numeric_cols = ['chuva_mm', 'umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc',
                         'precipitacao_acumulada_mm']
         for col in numeric_cols:
             if col in df_completo.columns:
-                df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
+                df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce', downcast='float')
 
     except Exception as e:
         return dbc.Alert(f"Erro ao processar dados: {e}", color="danger"), id_ponto
@@ -374,11 +381,8 @@ def load_logs_content(is_open, id_ponto, logs_data):
             except:
                 raw_list = logs_data.split('\n')
 
-        # Filtra pelo ponto
         logs_ponto_brutos = [log for log in raw_list if
                              (isinstance(log, str) and (f"| {id_ponto} |" in log or "| GERAL |" in log))]
-
-        # --- APLICA O FILTRO DO CLIENTE AQUI ---
         logs_ponto_limpos = filtrar_logs_cliente(logs_ponto_brutos)
 
         if not logs_ponto_limpos:
@@ -394,11 +398,7 @@ def load_logs_content(is_open, id_ponto, logs_data):
 def generate_logs_pdf(n_clicks, id_ponto, logs_filtrados):
     if not n_clicks or not id_ponto or not logs_filtrados: return dash.no_update
     config = PONTOS_DE_ANALISE.get(id_ponto, {"nome": "Ponto"})
-
-    # O filtro já foi aplicado no callback 'load_logs_content' e salvo no 'store-logs-filtrados'
-    # Então aqui apenas geramos o PDF com o que veio
     pdf_buffer = gerador_pdf.criar_relatorio_logs_em_memoria(config['nome'], logs_filtrados)
-
     return dcc.send_bytes(lambda f: f.write(pdf_buffer.getvalue()),
                           f"Logs_{config['nome']}_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf")
 
@@ -484,7 +484,15 @@ def update_dynamic_accumulated_text(selected_hours, pathname):
     if selected_hours == 72 or not pathname.startswith('/ponto/'): return None
     try:
         id_ponto = pathname.split('/')[-1]
-        df_ponto = data_source.read_data_from_sqlite(id_ponto=id_ponto, last_hours=selected_hours)
+
+        # OTIMIZAÇÃO TEXTO ACUMULADO: Pede só o necessário
+        cols_necessarias = ['timestamp', 'id_ponto', 'chuva_mm', 'precipitacao_acumulada_mm']
+
+        df_ponto = data_source.read_data_from_sqlite(
+            id_ponto=id_ponto,
+            last_hours=selected_hours,
+            colunas=cols_necessarias
+        )
         if df_ponto.empty: return None
 
         df_ponto.loc[:, 'timestamp'] = pd.to_datetime(df_ponto['timestamp'])
