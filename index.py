@@ -159,7 +159,7 @@ def worker_main_loop(memoria_worker):
                                 ultima_leitura_valida.get('umidade_3m_perc')) else None
                             ponto_info['timestamp_local'] = ts_leitura.tz_convert('America/Sao_Paulo').isoformat()
 
-                            bases = {f'base_{d}m': df_com_umidade[f'umidade_{d}m_perc'].min() for d in [1, 2, 3]}
+                            bases = {f'base_{d}m': CONSTANTES_PADRAO[f'UMIDADE_BASE_{d}M'] for d in [1, 2, 3]}
                             for d in [1, 2, 3]:
                                 if pd.isna(bases[f'base_{d}m']): bases[f'base_{d}m'] = CONSTANTES_PADRAO[
                                     f'UMIDADE_BASE_{d}M']
